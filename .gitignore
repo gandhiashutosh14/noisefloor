@@ -17,3 +17,4 @@ mlruns/
 artifacts/
 .mltest/
 .checks/
+.mini/
