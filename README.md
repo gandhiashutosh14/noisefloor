@@ -152,7 +152,7 @@ What it adds up to:
 ![What the latent codes contain](reports/probes.png)
 
 Audit trail: three evaluation days of the JEPA agent went through TRACEWAKE on a real AutoMQ 1.7.4
-broker in CI ([`audit.yml`](.github/workflows/audit.yml)). 861 decisions were published twice; the
+broker in CI ([`audit.yml`](.github/workflows/audit.yml), report in [`reports/audit-automq.md`](reports/audit-automq.md)). 861 decisions were published twice; the
 ledger rebuilt from the log inserted 861 and ignored 861 duplicates, with no gaps. Replaying all 301
 executed actions under a stricter policy (max 24 replicas, no failover) flipped none, because the
 agent never needed more than 24 replicas or a failover on those days.

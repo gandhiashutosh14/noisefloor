@@ -1,0 +1,20 @@
+{
+  "bus": "Kafka-compatible broker at localhost:9092",
+  "published": 1722,
+  "ingest": {
+    "consumed": 1722,
+    "inserted": 861,
+    "duplicates": 861,
+    "invalid": 0
+  },
+  "runs": 3,
+  "events": 861,
+  "gaps": {},
+  "idempotent": true,
+  "replay_policy": "gate-v2",
+  "decisions": 861,
+  "executed_non_noop": 301,
+  "flips": 0,
+  "flips_by_action": {},
+  "examples": []
+}
