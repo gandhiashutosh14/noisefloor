@@ -1,0 +1,48 @@
+{
+  "level": "main_d95",
+  "distractor_dims": 16,
+  "data_seed": 777001,
+  "steps": 1200,
+  "commit": "uncommitted",
+  "results": {
+    "jepa": {
+      "train_seconds": 114.4,
+      "params": 139560,
+      "probe_state_r2": 0.3668,
+      "probe_xi_r2": 0.6276,
+      "erank": 15.7847,
+      "probe_r2_load": 0.7949,
+      "probe_r2_log_queue": 0.485,
+      "probe_r2_replicas": 0.5292,
+      "probe_r2_pending": 0.0527,
+      "probe_r2_cache": 0.065,
+      "probe_r2_health": 0.0335,
+      "probe_r2_log_p95": 0.5612,
+      "probe_r2_error_rate": 0.4132,
+      "kstep_err_1": 0.7555,
+      "kstep_err_2": 0.752,
+      "kstep_err_3": 0.7534,
+      "kstep_err_4": 0.7569
+    },
+    "recon": {
+      "train_seconds": 61.9,
+      "params": 243624,
+      "probe_state_r2": 0.3189,
+      "probe_xi_r2": 0.7892,
+      "erank": 15.6857,
+      "probe_r2_load": 0.2211,
+      "probe_r2_log_queue": 0.6888,
+      "probe_r2_replicas": 0.1989,
+      "probe_r2_pending": 0.0669,
+      "probe_r2_cache": 0.046,
+      "probe_r2_health": 0.0533,
+      "probe_r2_log_p95": 0.7557,
+      "probe_r2_error_rate": 0.5205,
+      "kstep_err_1": 0.9263,
+      "kstep_err_2": 0.9221,
+      "kstep_err_3": 0.9487,
+      "kstep_err_4": 0.9583
+    }
+  },
+  "generated": "2026-09-29"
+}

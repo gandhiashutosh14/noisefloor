@@ -1,0 +1,90 @@
+name: grid
+
+# The pre-registered experiment grid, sharded over 16 CPU jobs, then one aggregate job that merges the
+# shards' Delta tables and renders RESULTS.md, reports/results.json and the charts. Run it by hand;
+# the owner commits the rendered results.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tier:
+        description: "1 = confirmatory grid, 2 = plus ablations"
+        required: true
+        default: "2"
+      prereg:
+        description: "pre-registration tag the grid runs under"
+        required: true
+        default: "prereg-v1"
+
+permissions:
+  contents: read
+
+env:
+  CUDA_VISIBLE_DEVICES: ""
+  PYTHONUTF8: "1"
+  MLFLOW_DISABLE_TELEMETRY: "true"
+  MLFLOW_DISABLE_AGENT_HINT: "1"
+  SHARDS: "16"
+
+jobs:
+  shard:
+    name: shard ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu
+      - run: python -m pip install -e .
+      - name: Record the commit and the pre-registration tag it descends from
+        run: |
+          git fetch --tags --force -q
+          echo "commit $(git rev-parse --short HEAD); prereg tag ${{ inputs.prereg }} at $(git rev-list -n 1 ${{ inputs.prereg }} | cut -c1-7)" | tee provenance.txt
+          git merge-base --is-ancestor ${{ inputs.prereg }} HEAD
+      - name: Run the shard
+        run: noisefloor grid --tier ${{ inputs.tier }} --shard ${{ matrix.shard }} --of $SHARDS --lake lake --runs runs --job grid
+      - name: Keep only the tables and models (observations are regenerated deterministically)
+        run: |
+          mkdir -p out/lake
+          cp -r lake/results lake/train_runs lake/eval_steps lake/meta out/lake/ 2>/dev/null || true
+          cp -r runs out/runs
+          cp -r mlruns out/mlruns 2>/dev/null || true
+          cp provenance.txt out/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shard-${{ matrix.shard }}
+          path: out/
+          retention-days: 30
+
+  aggregate:
+    needs: shard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu
+      - run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Merge the shards' Delta tables
+        run: noisefloor aggregate --shards "artifacts/shard-*/lake" --out lake-all
+      - name: Render the results
+        run: noisefloor report --lake lake-all --out rendered --prereg ${{ inputs.prereg }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: results
+          path: |
+            rendered/
+            lake-all/
+          retention-days: 90

@@ -1,0 +1,201 @@
+{
+  "description": "Pre-registered grid. Tier 1 is the confirmatory set; tier 2 adds ablations. Seeds were raised above the design spec (5/3/3) before registration because the benchmark showed the grid is cheap.",
+  "blocks": [
+    {
+      "name": "main-tested",
+      "tier": 1,
+      "variants": [
+        "jepa",
+        "recon"
+      ],
+      "levels": [
+        [
+          "main",
+          0.0
+        ],
+        [
+          "main",
+          0.8
+        ]
+      ],
+      "seeds": 8,
+      "evals": [
+        "main"
+      ]
+    },
+    {
+      "name": "main-descriptive",
+      "tier": 1,
+      "variants": [
+        "jepa",
+        "recon"
+      ],
+      "levels": [
+        [
+          "main",
+          0.5
+        ],
+        [
+          "main",
+          0.95
+        ]
+      ],
+      "seeds": 5,
+      "evals": [
+        "main"
+      ]
+    },
+    {
+      "name": "ood",
+      "tier": 1,
+      "variants": [
+        "jepa",
+        "recon"
+      ],
+      "levels": [
+        [
+          "main",
+          0.8
+        ]
+      ],
+      "seeds": 8,
+      "evals": [
+        "ood"
+      ]
+    },
+    {
+      "name": "collapse-control",
+      "tier": 1,
+      "variants": [
+        "lambda0"
+      ],
+      "levels": [
+        [
+          "main",
+          0.0
+        ],
+        [
+          "main",
+          0.8
+        ]
+      ],
+      "seeds": 5,
+      "evals": [
+        "main"
+      ]
+    },
+    {
+      "name": "controls",
+      "tier": 1,
+      "variants": [
+        "ema",
+        "costonly"
+      ],
+      "levels": [
+        [
+          "main",
+          0.8
+        ]
+      ],
+      "seeds": 5,
+      "evals": [
+        "main"
+      ]
+    },
+    {
+      "name": "predictable-arm",
+      "tier": 2,
+      "variants": [
+        "jepa",
+        "recon"
+      ],
+      "levels": [
+        [
+          "predictable",
+          0.8
+        ]
+      ],
+      "seeds": 5,
+      "evals": [
+        "main"
+      ]
+    },
+    {
+      "name": "isotropic-arm",
+      "tier": 2,
+      "variants": [
+        "jepa",
+        "recon"
+      ],
+      "levels": [
+        [
+          "isotropic",
+          0.8
+        ]
+      ],
+      "seeds": 5,
+      "evals": [
+        "main"
+      ]
+    },
+    {
+      "name": "zdim-32",
+      "tier": 2,
+      "variants": [
+        "jepa",
+        "recon"
+      ],
+      "levels": [
+        [
+          "main",
+          0.8
+        ]
+      ],
+      "seeds": 3,
+      "z_dim": 32,
+      "evals": [
+        "main"
+      ]
+    },
+    {
+      "name": "zdim-8",
+      "tier": 2,
+      "variants": [
+        "jepa",
+        "recon"
+      ],
+      "levels": [
+        [
+          "main",
+          0.8
+        ]
+      ],
+      "seeds": 3,
+      "z_dim": 8,
+      "evals": [
+        "main"
+      ]
+    },
+    {
+      "name": "horizon-4",
+      "tier": 2,
+      "variants": [
+        "jepa"
+      ],
+      "levels": [
+        [
+          "main",
+          0.8
+        ]
+      ],
+      "seeds": 3,
+      "evals": [
+        "h4"
+      ]
+    }
+  ],
+  "eval_days": {
+    "main": 32,
+    "ood": 16
+  }
+}

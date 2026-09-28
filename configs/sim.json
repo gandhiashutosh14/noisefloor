@@ -1,0 +1,55 @@
+{
+  "steps_per_episode": 288,
+  "step_seconds": 300,
+  "mu": 20.0,
+  "mean_load": 150.0,
+  "diurnal_amplitude": 0.5,
+  "load_noise": 0.05,
+  "spike_decay_steps": 6.0,
+  "flash_spikes_per_day": 3.0,
+  "flash_amplitude": [
+    1.0,
+    2.0
+  ],
+  "ramp_growth": 0.8,
+  "incident_health": 0.4,
+  "incident_start": [
+    48,
+    240
+  ],
+  "incident_steps": 36,
+  "replicas_min": 2,
+  "replicas_max": 40,
+  "warmup_steps": 2,
+  "cache_decay": 0.97,
+  "cache_warm_gain": 0.5,
+  "shed_step": 0.1,
+  "shed_max": 0.3,
+  "shed_restore_steps": 3,
+  "failover_lockout_steps": 12,
+  "failovers_per_day": 1,
+  "cache_after_failover": 0.2,
+  "budget_actions": 6,
+  "budget_window": 12,
+  "cache_warm_every": 6,
+  "slo_latency_ms": 250.0,
+  "slo_error_rate": 0.01,
+  "cost_replica_step": 0.05,
+  "cost_violation_step": 5.0,
+  "cost_shed_fraction": 2.0,
+  "cost_cache_warm": 0.1,
+  "cost_failover": 20.0,
+  "rho_cap": 0.98,
+  "timeout_s": 30.0,
+  "families": [
+    "diurnal",
+    "flash",
+    "ramp",
+    "incident"
+  ],
+  "ood_families": [
+    "launch",
+    "double_spike"
+  ],
+  "distractor_dims": 16
+}

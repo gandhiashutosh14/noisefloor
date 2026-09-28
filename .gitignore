@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+# generated data and runs (rebuilt deterministically by `noisefloor data`)
+lake/
+lake_*/
+lake-*/
+runs/
+runs-*/
+mlruns/
+.smoke/
+artifacts/
+.mltest/
+.checks/

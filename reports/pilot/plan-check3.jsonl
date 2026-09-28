@@ -1,0 +1,4 @@
+{"variant": "jepa", "d": 0.0, "opts": {}, "J": 369.9, "viol": 36.3125, "replicas": 12.6, "r/p": 1.63, "secs": 26.6, "acts": {"noop": 2908, "cache_warm": 659, "scale_down_2": 467, "scale_up_2": 449, "shed_10": 109}}
+{"variant": "jepa", "d": 0.8, "opts": {}, "J": 845.5, "viol": 133.25, "replicas": 10.1, "r/p": 2.69, "secs": 24.2, "acts": {"noop": 2581, "shed_10": 815, "cache_warm": 715, "scale_down_2": 295, "scale_up_2": 152, "scale_up_6": 34}}
+{"variant": "recon", "d": 0.0, "opts": {}, "J": 261.2, "viol": 13.375, "replicas": 12.9, "r/p": 1.11, "secs": 26.6, "acts": {"noop": 3111, "cache_warm": 540, "scale_down_2": 448, "scale_up_2": 404, "shed_10": 81, "scale_up_6": 6, "failover": 2}}
+{"variant": "recon", "d": 0.8, "opts": {}, "J": 840.5, "viol": 134.6875, "replicas": 11.3, "r/p": 2.53, "secs": 26.5, "acts": {"noop": 2474, "scale_down_2": 826, "scale_up_2": 636, "cache_warm": 589, "scale_up_6": 53, "shed_10": 14}}

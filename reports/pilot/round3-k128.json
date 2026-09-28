@@ -1,0 +1,48 @@
+{
+  "level": "main_d95",
+  "distractor_dims": 128,
+  "data_seed": 777001,
+  "steps": 1200,
+  "commit": "uncommitted",
+  "results": {
+    "jepa": {
+      "train_seconds": 114.2,
+      "params": 139560,
+      "probe_state_r2": 0.3026,
+      "probe_xi_r2": 0.064,
+      "erank": 15.9072,
+      "probe_r2_load": 0.5388,
+      "probe_r2_log_queue": 0.517,
+      "probe_r2_replicas": 0.2757,
+      "probe_r2_pending": 0.0405,
+      "probe_r2_cache": 0.0535,
+      "probe_r2_health": 0.0302,
+      "probe_r2_log_p95": 0.5447,
+      "probe_r2_error_rate": 0.4206,
+      "kstep_err_1": 0.8884,
+      "kstep_err_2": 0.8883,
+      "kstep_err_3": 0.8839,
+      "kstep_err_4": 0.8786
+    },
+    "recon": {
+      "train_seconds": 61.6,
+      "params": 243624,
+      "probe_state_r2": 0.2129,
+      "probe_xi_r2": 0.0378,
+      "erank": 15.84,
+      "probe_r2_load": 0.3335,
+      "probe_r2_log_queue": 0.4154,
+      "probe_r2_replicas": 0.1435,
+      "probe_r2_pending": 0.0293,
+      "probe_r2_cache": 0.0097,
+      "probe_r2_health": 0.0291,
+      "probe_r2_log_p95": 0.4303,
+      "probe_r2_error_rate": 0.3122,
+      "kstep_err_1": 0.9657,
+      "kstep_err_2": 0.9476,
+      "kstep_err_3": 0.9878,
+      "kstep_err_4": 0.9722
+    }
+  },
+  "generated": "2026-09-29"
+}

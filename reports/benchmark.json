@@ -1,0 +1,21 @@
+{
+  "cpu": "AMD64 Family 25 Model 116 Stepping 1, AuthenticAMD",
+  "threads": 2,
+  "torch": "2.14.0+cpu",
+  "cuda_visible_devices": "",
+  "train_100_steps_s": {
+    "jepa": 11.87,
+    "recon": 7.23,
+    "ema": 6.09,
+    "costonly": 5.71
+  },
+  "decisions_100x16_s": 4.5,
+  "ms_per_env_decision": 2.81,
+  "estimated_1200_step_training_min": {
+    "jepa": 2.4,
+    "recon": 1.4,
+    "ema": 1.2,
+    "costonly": 1.1
+  },
+  "estimated_eval_16_days_min": 0.22
+}

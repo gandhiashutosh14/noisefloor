@@ -1,0 +1,21 @@
+{
+  "policy_id": "gate-v1",
+  "budget": {"actions": 6, "window_steps": 12},
+  "capabilities": [
+    {"name": "noop", "effect": "reversible", "requires_approval": false, "inputs": {}},
+    {"name": "scale_up_2", "effect": "reversible", "requires_approval": false,
+     "inputs": {"replicas_after": "number"}, "constraints": {"replicas_after": {"max": 40}}},
+    {"name": "scale_up_6", "effect": "reversible", "requires_approval": false,
+     "inputs": {"replicas_after": "number"}, "constraints": {"replicas_after": {"max": 40}}},
+    {"name": "scale_down_2", "effect": "reversible", "requires_approval": false,
+     "inputs": {"replicas_after": "number"}, "constraints": {"replicas_after": {"min": 2}}},
+    {"name": "cache_warm", "effect": "reversible", "requires_approval": false,
+     "inputs": {"steps_since_warm": "number"}, "constraints": {"steps_since_warm": {"min": 6}}},
+    {"name": "shed_10", "effect": "compensable", "compensation": "restore_traffic", "requires_approval": false,
+     "inputs": {"shed_after": "number"}, "constraints": {"shed_after": {"max": 0.3}}},
+    {"name": "restore_traffic", "effect": "reversible", "requires_approval": false, "inputs": {}},
+    {"name": "failover", "effect": "irreversible", "requires_approval": true,
+     "inputs": {"failovers_today": "number", "lockout_steps": "number"},
+     "constraints": {"failovers_today": {"max": 0}, "lockout_steps": {"max": 0}}}
+  ]
+}
