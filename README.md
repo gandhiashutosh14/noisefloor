@@ -8,7 +8,7 @@
 ![Compute](https://img.shields.io/badge/compute-CPU%20only-lightgrey)
 ![Lake](https://img.shields.io/badge/data-Delta%20Lake%20(delta--rs)-blue)
 ![Tracking](https://img.shields.io/badge/tracking-MLflow-blue)
-![Status](https://img.shields.io/badge/status-pre--registered%20v0.1-yellow)
+![Status](https://img.shields.io/badge/status-v0.1%20results%20published-yellow)
 
 > **In plain English:** an on-call engineer watches dashboards and decides when to add servers,
 > shed traffic or fail over to another region. NOISEFLOOR is an agent that makes those decisions.
@@ -20,8 +20,8 @@
 > sees is noise? The world is simulated, the method is published research (LeJEPA's SIGReg and
 > LeWorldModel), and the experiment was pre-registered before any result existed.
 
-**Reading guide:** the next two sections say what was built and why it matters. [The experiment](#the-experiment)
-and [results](#results) are the evidence. Engineers can go to [architecture](#architecture) and
+**Reading guide:** [results](#results) first if you want the answer. The next two sections say what
+was built and why it matters; [the experiment](#the-experiment) says how it was tested. Engineers can go to [architecture](#architecture) and
 [run it](#run-it). [What this does not claim](#what-this-does-not-claim) is not optional reading.
 
 ## The problem
@@ -115,10 +115,47 @@ clean channels, a declared handicap in their favour. All agents face the same ga
 
 ## Results
 
-The confirmatory grid runs next in GitHub Actions; [`RESULTS.md`](RESULTS.md) will be published
-from it whatever it shows. Until then, the only numbers in this repository are the pre-registration
-pilots and checks in [`reports/pilot/`](reports/pilot/), which were used to fix the design and are not
-evidence for any hypothesis.
+Pre-registered, then run once: 104 trained models and 3,920 evaluated days in 16 parallel GitHub
+Actions jobs ([run 36489642311](https://github.com/gandhiashutosh14/noisefloor/actions/runs/36489642311)),
+all on the tagged commit. Full tables, intervals and interpretation in [`RESULTS.md`](RESULTS.md).
+
+![Gap closed as noise grows](reports/headline.png)
+
+| Pre-registered test | Result | Verdict |
+|---|---|---|
+| **H1 (primary):** at 80% noise, JEPA's daily cost below reconstruction's | 281.5 vs 320.0; difference -38.5, 95% CI [-56.6, -21.4], seed t-interval [-56.2, -20.8] | **supported** |
+| Sanity: equivalent with no noise (within 3%) | 90% CI of the relative difference [-0.9%, +1.7%] | **equivalent** |
+| H2: at 80% noise, JEPA beats the tuned runbook reading clean metrics | 281.5 vs 285.3; [-32.0, +25.7] | not supported (a tie) |
+| H3: latent collapses without SIGReg (rank <= 3 of 16), not with it (>= 10) | 5.5-6.2 without, 15.6-15.9 with | does not hold (partial collapse) |
+| JEPA vs reconstruction at 50% / 95% noise; isotropic noise | -40.9 / -132.7; -21.5 (all intervals below zero) | supported |
+| JEPA-SIGReg vs an EMA teacher; vs a cost-only latent | +25.5 and +46.6: both alternatives plan **better** | reversed |
+| Predictable noise shrinks JEPA's edge | difference in differences -27.0 [-62.1, +2.5] | not supported |
+
+![Every agent at 80% noise](reports/d80_models.png)
+
+What it adds up to:
+
+- **As telemetry fills with noise, a JEPA world model keeps planning where a reconstruction model
+  breaks down**, at the pre-registered latent width of 16: ahead at 50%, 80% and 95% noise, and
+  equivalent without noise. On noisy telemetry it ties a tuned HPA + runbook that reads clean
+  metrics, using 26% fewer replica-hours and accepting more SLO-violation minutes.
+- **SIGReg is not the best anti-collapse method for this job.** It keeps all 16 latent dimensions
+  alive (rank 15.7), and the ones the state does not need fill with noise (distractor R^2 0.43). An
+  EMA teacher learns a rank-7 code that carries more state (R^2 0.68) and almost no noise (0.045),
+  and plans better (263.4). A latent shaped only by the violation-risk loss plans best of all the
+  learned models (242.2, 75% of the gap to the oracle closed).
+- **The result is width-dependent.** In an exploratory ablation (3 seeds), giving reconstruction a
+  32-dimensional latent lets it keep both the state and the noise, and it then plans better (266.0)
+  than any JEPA-SIGReg width tried. Reconstruction's failure at width 16 is a bottleneck effect.
+- Negative and reversed results are reported beside the positive one, as registered.
+
+![What the latent codes contain](reports/probes.png)
+
+Audit trail: three evaluation days of the JEPA agent went through TRACEWAKE on a real AutoMQ 1.7.4
+broker in CI ([`audit.yml`](.github/workflows/audit.yml)). 861 decisions were published twice; the
+ledger rebuilt from the log inserted 861 and ignored 861 duplicates, with no gaps. Replaying all 301
+executed actions under a stricter policy (max 24 replicas, no failover) flipped none, because the
+agent never needed more than 24 replicas or a failover on those days.
 
 ## Run it
 
@@ -170,8 +207,8 @@ reports/      pilot/ (every pre-registration round)  benchmark.json
 
 | | Helpful | Harmful |
 |---|---|---|
-| **Internal** | **Strengths:** pre-registered, paired, multi-seed design with the whole grid reproducible in public CI; a full stack around the model (lake, tracking, gate, audit), not a notebook; CPU-only, about 4 CPU-hours for the complete grid; every design change before registration is documented with its numbers. | **Weaknesses:** a simulated world; small models and a 16-dimensional latent; offline data from one operator family; the rule baselines read clean metrics, so "beats the runbook" compares unequal inputs by design. |
-| **External** | **Opportunities:** the same harness can test any representation objective (contrastive, VICReg, diffusion) or planner (MPPI, gradient-based) on the same paired days; the audit path works with any Kafka-compatible log; the telemetry model can be swapped for replayed real metrics. | **Threats:** results in a synthetic world can be over-read; world-model methods move quickly; SIGReg's behaviour on heavy-tailed operational signals (the pilots show it compresses rare spikes) may limit it in exactly the events operations care about. |
+| **Internal** | **Strengths:** pre-registered, paired, multi-seed design with the whole grid run in public CI on the tagged commit; a primary result with both intervals clear of zero, reported beside two reversed secondaries and a failed hypothesis; a full stack around the model (lake, tracking, gate, audit), not a notebook; CPU-only, about 4 CPU-hours for the complete grid. | **Weaknesses:** a simulated world; small models and a 16-dimensional latent; offline data from one operator family; the rule baselines read clean metrics, so "beats the runbook" compares unequal inputs by design. |
+| **External** | **Opportunities:** the finding that SIGReg's isotropy stops a model from discarding noise suggests testable fixes (a smaller latent chosen by validation, SIGReg on a projection, a rank-adaptive target); the same harness can test any representation objective or planner on the same paired days; the audit path works with any Kafka-compatible log. | **Threats:** results in a synthetic world can be over-read; the headline depends on latent width (exploratory ablation); SIGReg compresses rare spikes (pilot probes), which are the events operations care about most. |
 
 ## Where this applies
 
