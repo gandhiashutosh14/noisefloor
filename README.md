@@ -8,7 +8,7 @@
 ![Compute](https://img.shields.io/badge/compute-CPU%20only-lightgrey)
 ![Lake](https://img.shields.io/badge/data-Delta%20Lake%20(delta--rs)-blue)
 ![Tracking](https://img.shields.io/badge/tracking-MLflow-blue)
-![Status](https://img.shields.io/badge/status-v0.1%20results%20published-yellow)
+![Status](https://img.shields.io/badge/status-v0.2%20review%20fixes-yellow)
 
 > **In plain English:** an on-call engineer watches dashboards and decides when to add servers,
 > shed traffic or fail over to another region. NOISEFLOOR is an agent that makes those decisions.
@@ -18,7 +18,8 @@
 > decision is written to an audit log that can be replayed under a stricter policy. The question it
 > was built to answer is the one real dashboards raise: what happens when most of what the agent
 > sees is noise? The world is simulated, the method is published research (LeJEPA's SIGReg and
-> LeWorldModel), and the experiment was pre-registered before any result existed.
+> LeWorldModel), and the experiment was pre-registered before any confirmatory run (the pilots that shaped the design are
+> listed in the registration).
 
 **Reading guide:** [results](#results) first if you want the answer. The next two sections say what
 was built and why it matters; [the experiment](#the-experiment) says how it was tested. Engineers can go to [architecture](#architecture) and
@@ -50,13 +51,13 @@ governance gate and an audit trail around it, on a laptop CPU.
 | Layer | What it is | Where |
 |---|---|---|
 | World | A vectorised simulator of a web service: diurnal load, flash crowds, ramps, regional incidents; queueing latency (Sakasegawa M/M/c), client timeouts, error rates, replica warm-up, cache warmth, load shedding, failover. | `noisefloor/sim/` |
-| Telemetry | 128 channels mixing 12 true-state features, plus 16 distractor sources leaking into every channel at a controlled share d of the variance (0%, 50%, 80%, 95%). Unpredictable by construction; a predictable arm and an isotropic arm test the premise. | `noisefloor/sim/telemetry.py` |
+| Telemetry | 128 channels mixing 12 true-state features, plus 16 distractor sources leaking into every channel at a controlled share d of the pre-activation variance (nominal 0%, 50%, 80%, 95%; the z-scored input the models see carries about 6%, 65%, 84% and 94% noise, see RESULTS.md). Unpredictable by construction; a predictable arm and an isotropic arm test the premise. | `noisefloor/sim/telemetry.py` |
 | Data platform | Offline trajectories in **Delta Lake** (delta-rs, no JVM), partitioned by noise level; every training run records the table versions it read and can be reproduced with time travel; the training loader refuses the true-state and distractor columns. | `noisefloor/data/` |
 | World models | A JEPA world model with SIGReg (encoder, action-conditioned predictor, violation-risk head, inverse-dynamics head), and four controls trained with the same recipe: reconstruction, JEPA without SIGReg (collapse control), JEPA with an EMA teacher, and a value-equivalent cost-only model. | `noisefloor/models/` |
-| Planner | Cross-entropy-method planning over 8-step action sequences in latent space. The actuator (replicas, cooldowns, action budget) is simulated exactly inside every imagined rollout, so the planner never plans an action the gate would refuse. | `noisefloor/agents/wm_agent.py`, `noisefloor/plan/` |
+| Planner | Cross-entropy-method planning over 8-step action sequences in latent space. The actuator (replicas, cooldowns, action budget) is simulated exactly inside every imagined rollout under the gate's own limits, so a refused action is scored as a no-op and the ranked first actions are ones the gate accepts (fixed in v0.2: in the pre-registered run half the first choices were refused and the next candidate ran, see RESULTS.md). | `noisefloor/agents/wm_agent.py`, `noisefloor/plan/` |
 | Governance | One gate for every agent, baselines included, using the capability-catalog schema of `governed-agent-orchestrator`: effect classes (reversible, compensable, irreversible), approval for failover, a shed cap with automatic restore, an action budget. | `noisefloor/govern/`, `configs/gate_v1.json` |
-| Audit | Every decision is a TRACEWAKE envelope: published to a Kafka-compatible log (AutoMQ in CI), rebuilt into a ledger from the log alone, and replayed under a stricter policy to list what would flip. | `noisefloor/audit/`, `.github/workflows/audit.yml` |
-| Experiment tracking | MLflow runs per training and evaluation (params, metrics every 50 steps, probes, the encoder as a logged model), with one SQLite store per process; decision traces as MLflow spans. | `noisefloor/tracking.py` |
+| Audit | Every decision is recorded in TRACEWAKE envelope form with every candidate's verdict; in the audit job three days' worth are published to a Kafka-compatible log (AutoMQ in CI), rebuilt into a ledger from the log alone, and replayed under a stricter policy, action budget included, to list what would flip. | `noisefloor/audit/`, `.github/workflows/audit.yml` |
+| Experiment tracking | MLflow runs per training and evaluation (params, metrics every 50 steps, probes, the encoder as a logged model), with one SQLite store per process; decision traces as MLflow spans (encode, plan, gate, act) for one evaluation day in eight. | `noisefloor/tracking.py` |
 | Science | Pre-registered hypotheses, paired evaluation days, hierarchical bootstrap, seed-level t-intervals, TOST, Holm correction; the full grid runs in GitHub Actions. | `PREREGISTRATION.md`, `noisefloor/eval/`, `.github/workflows/grid.yml` |
 
 ## Architecture
@@ -125,10 +126,11 @@ all on the tagged commit. Full tables, intervals and interpretation in [`RESULTS
 |---|---|---|
 | **H1 (primary):** at 80% noise, JEPA's daily cost below reconstruction's | 281.5 vs 320.0; difference -38.5, 95% CI [-56.6, -21.4], seed t-interval [-56.2, -20.8] | **supported** |
 | Sanity: equivalent with no noise (within 3%) | 90% CI of the relative difference [-0.9%, +1.7%] | **equivalent** |
-| H2: at 80% noise, JEPA beats the tuned runbook reading clean metrics | 281.5 vs 285.3; [-32.0, +25.7] | not supported (a tie) |
+| H2: at 80% noise, JEPA beats the tuned runbook reading clean metrics | 281.5 vs 285.3; [-32.0, +25.7] | not supported (not distinguishable; the registered runbook also carried a bug, see below) |
 | H3: latent collapses without SIGReg (rank <= 3 of 16), not with it (>= 10) | 5.5-6.2 without, 15.6-15.9 with | does not hold (partial collapse) |
 | JEPA vs reconstruction at 50% / 95% noise; isotropic noise | -40.9 / -132.7; -21.5 (all intervals below zero) | supported |
-| JEPA-SIGReg vs an EMA teacher; vs a cost-only latent | +25.5 and +46.6: both alternatives plan **better** | reversed |
+| JEPA-SIGReg vs a cost-only latent (registered: JEPA lower) | +46.6: cost-only plans **better** | reversed |
+| JEPA-SIGReg vs an EMA teacher (registered without a direction) | +25.5: the EMA teacher plans better | EMA lower |
 | Predictable noise shrinks JEPA's edge | difference in differences -27.0 [-62.1, +2.5] | not supported |
 
 ![Every agent at 80% noise](reports/d80_models.png)
@@ -137,22 +139,34 @@ What it adds up to:
 
 - **As telemetry fills with noise, a JEPA world model keeps planning where a reconstruction model
   breaks down**, at the pre-registered latent width of 16: ahead at 50%, 80% and 95% noise, and
-  equivalent without noise. On noisy telemetry it ties a tuned HPA + runbook that reads clean
-  metrics, using 26% fewer replica-hours and accepting more SLO-violation minutes.
+  equivalent without noise. On noisy telemetry it matched the registered runbook's cost, with 26%
+  fewer replica-hours and more SLO-violation minutes; with the runbook's replica-count bug fixed
+  (and, further, a health-aware approver) the runbook comes out 0.2-6.8 per day ahead of JEPA.
+  So the honest reading is: as good as a well-configured runbook, not better.
 - **SIGReg is not the best anti-collapse method for this job.** It keeps all 16 latent dimensions
   alive (rank 15.7), and the ones the state does not need fill with noise (distractor R^2 0.43). An
   EMA teacher learns a rank-7 code that carries more state (R^2 0.68) and almost no noise (0.045),
-  and plans better (263.4). A latent shaped only by the violation-risk loss plans best of all the
-  learned models (242.2, 75% of the gap to the oracle closed).
-- **The result is width-dependent.** In an exploratory ablation (3 seeds), giving reconstruction a
-  32-dimensional latent lets it keep both the state and the noise, and it then plans better (266.0)
-  than any JEPA-SIGReg width tried. Reconstruction's failure at width 16 is a bottleneck effect.
+  and plans better (263.4; this comparison was registered without a direction). A latent shaped
+  only by the violation-risk loss plans best of all the learned models (242.2, 75% of the gap to
+  the oracle closed), reversing a registered prediction.
+- **The result may be width-dependent.** In an exploratory ablation (3 seeds), reconstruction with a
+  32-dimensional latent scored 266.0 against 297.1 for JEPA-SIGReg at the same width; the seed-level
+  intervals include zero, so this is a lead for follow-up, not a result. A bottleneck effect at width
+  16 (16 loud noise sources competing with the state for 16 dimensions) is the candidate explanation.
 - Negative and reversed results are reported beside the positive one, as registered.
 
 ![What the latent codes contain](reports/probes.png)
 
-Audit trail: three evaluation days of the JEPA agent went through TRACEWAKE on a real AutoMQ 1.7.4
-broker in CI ([`audit.yml`](.github/workflows/audit.yml), report in [`reports/audit-automq.md`](reports/audit-automq.md)). 861 decisions were published twice; the
+**Review and corrections (2026-09-29).** An independent code review after publication found two bugs
+that favoured the learned agents (the rule baselines multiplied a stale utilisation by the current
+replica count; the approver granted failover on overload) and one in the planner-gate interface
+(the CEM ranked on proposed rather than effective actions, so the "denials" metric was an artifact),
+plus mislabelled verdicts in the report. The pre-registered numbers stand as reported; the corrected
+reference numbers, the definition of what `d` measures, and every fix are in
+[`RESULTS.md`](RESULTS.md) ("Post-registration findings and corrections") and [`CHANGELOG.md`](CHANGELOG.md).
+
+Audit trail: three evaluation days of a JEPA agent trained inside the audit job went through TRACEWAKE on a
+real AutoMQ 1.7.4 broker (MinIO-compatible object store) in CI ([`audit.yml`](.github/workflows/audit.yml), report in [`reports/audit-automq.md`](reports/audit-automq.md)). 861 decisions were published twice; the
 ledger rebuilt from the log inserted 861 and ignored 861 duplicates, with no gaps. Replaying all 301
 executed actions under a stricter policy (max 24 replicas, no failover) flipped none, because the
 agent never needed more than 24 replicas or a failover on those days.
@@ -165,11 +179,12 @@ CPU only. `noisefloor/__init__.py` hides CUDA before torch is imported.
 python -m venv .venv && . .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu
 pip install -e ".[dev,audit]"
-pytest -q                                             # 47 tests, ~15 s
+pytest -q                                             # 56 tests, ~25 s
 noisefloor smoke                                      # data -> 200 training steps -> 2 governed days, ~30 s
 noisefloor data                                       # the full lake: 250 days x 6 telemetry levels
 noisefloor cell --variant jepa --d 0.8 --seed 0       # train + evaluate one model (~3 min)
 noisefloor audit                                      # 3 days through TRACEWAKE, replayed under gate-v2
+python scripts/posthoc_baselines.py                   # the corrected baselines (post-registration analysis)
 noisefloor grid --tier 2 --shard 0 --of 16            # one shard of the pre-registered grid
 mlflow ui --backend-store-uri sqlite:///mlruns/local-0.db
 ```
@@ -184,6 +199,12 @@ mlflow ui --backend-store-uri sqlite:///mlruns/local-0.db
 - It is not reinforcement learning: the data is offline and comes from one family of behaviour operators.
 - Approvals are simulated, the gate is not a safety proof, and the oracle is not optimal.
 - Cells with 3 seeds are descriptive only.
+- The rule baselines in the pre-registered run carried a replica-count bug and an error-only approver;
+  corrected reference numbers are reported post hoc in RESULTS.md, and the registered ones are not replaced.
+- The behaviour policy chose actions from clean channels, so actions carry hidden-state information into
+  the offline data; action-effect estimates are biased, for both learned models alike.
+- `d` is the distractor share of the pre-activation signal on the behaviour data; the model input's noise
+  share is higher (RESULTS.md, "What d measures").
 
 ## Project layout
 
@@ -199,15 +220,17 @@ noisefloor/
   eval/       harness.py  run.py  probes.py  stats.py  report.py
   grid.py  cli.py  tracking.py (MLflow)
 configs/      sim.json  grid.json  gate_v1.json  gate_v2.json
-scripts/      pilot.py  plan_check.py  diagnose.py  plan_variants.py  benchmark.py
-reports/      pilot/ (every pre-registration round)  benchmark.json
+docs/         DESIGN_SPEC.md (the pre-build spec the registration refers to)
+scripts/      pilot.py  plan_check.py  diagnose.py  plan_variants.py  benchmark.py  posthoc_baselines.py
+reports/      pilot/ (every pre-registration round)  benchmark.json  posthoc-baselines.json  audit-automq.md
+CHANGELOG.md  what changed after the pre-registered run, and why
 ```
 
 ## SWOT analysis
 
 | | Helpful | Harmful |
 |---|---|---|
-| **Internal** | **Strengths:** pre-registered, paired, multi-seed design with the whole grid run in public CI on the tagged commit; a primary result with both intervals clear of zero, reported beside two reversed secondaries and a failed hypothesis; a full stack around the model (lake, tracking, gate, audit), not a notebook; CPU-only, about 4 CPU-hours for the complete grid. | **Weaknesses:** a simulated world; small models and a 16-dimensional latent; offline data from one operator family; the rule baselines read clean metrics, so "beats the runbook" compares unequal inputs by design. |
+| **Internal** | **Strengths:** pre-registered, paired, multi-seed design with the whole grid run in public CI on the tagged commit; a primary result with both intervals clear of zero, reported beside a reversed secondary, a failed hypothesis and a post-publication review whose findings are disclosed with numbers; a full stack around the model (lake, tracking, gate, audit), not a notebook; CPU-only, about 4 CPU-hours for the complete grid. | **Weaknesses:** a simulated world; small models and a 16-dimensional latent; offline data from one operator family; the rule baselines read clean metrics, so "beats the runbook" compares unequal inputs by design. |
 | **External** | **Opportunities:** the finding that SIGReg's isotropy stops a model from discarding noise suggests testable fixes (a smaller latent chosen by validation, SIGReg on a projection, a rank-adaptive target); the same harness can test any representation objective or planner on the same paired days; the audit path works with any Kafka-compatible log. | **Threats:** results in a synthetic world can be over-read; the headline depends on latent width (exploratory ablation); SIGReg compresses rare spikes (pilot probes), which are the events operations care about most. |
 
 ## Where this applies

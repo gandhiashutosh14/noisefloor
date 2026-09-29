@@ -74,27 +74,43 @@ def cmd_grid(a) -> None:
 
 
 def cmd_aggregate(a) -> None:
+    """Merge the shards' Delta tables. Every shard is checked first (same data hash, same commit, same
+    table schemas) and nothing is written unless all pass; the output directory must not exist."""
     from deltalake import DeltaTable, write_deltalake
     out = Path(a.out)
-    hashes = set()
-    for lake in sorted(glob.glob(a.shards)):
-        lake = Path(lake)
+    if out.exists():
+        raise SystemExit(f"{out} exists; aggregate writes a fresh lake (re-running would append duplicates)")
+    shards = [Path(p) for p in sorted(glob.glob(a.shards))]
+    if not shards:
+        raise SystemExit(f"no shards match {a.shards}")
+    hashes, shas, schemas = set(), set(), {}
+    for lake in shards:
         meta = json.loads((lake / "meta" / "data.json").read_text(encoding="utf-8"))
         hashes.add(meta["data_hash"])
         for table in ("results", "train_runs", "eval_steps"):
             if (lake / table / "_delta_log").exists():
+                dt = DeltaTable(str(lake / table))
+                schema = dt.schema().to_arrow()
+                if schemas.setdefault(table, schema) != schema:
+                    raise SystemExit(f"{lake}/{table} has a different schema from the first shard's")
+                if table == "results":
+                    shas |= set(dt.to_pyarrow_table(columns=["git_sha"]).column("git_sha").unique().to_pylist())
+    if len(hashes) != 1:
+        raise SystemExit(f"shards saw different data: {sorted(hashes)}")
+    if len(shas) != 1:
+        raise SystemExit(f"shards ran on different commits: {sorted(shas)}")
+    for lake in shards:
+        for table in ("results", "train_runs", "eval_steps"):
+            if (lake / table / "_delta_log").exists():
                 tbl = DeltaTable(str(lake / table)).to_pyarrow_table()
-                write_deltalake(str(out / table), tbl, mode="append", schema_mode="merge",
-                                partition_by=["arm"] if table == "results" else None)
+                write_deltalake(str(out / table), tbl, mode="append", partition_by=["arm"] if table == "results" else None)
         tuning = lake / "meta" / "hpa_tuning.json"
         if tuning.exists():
             (out / "meta").mkdir(parents=True, exist_ok=True)
             (out / "meta" / "hpa_tuning.json").write_text(tuning.read_text(encoding="utf-8"), encoding="utf-8")
         _log(f"merged {lake}")
-    if len(hashes) != 1:
-        raise SystemExit(f"shards saw different data: {sorted(hashes)}")
     (out / "meta").mkdir(parents=True, exist_ok=True)
-    (out / "meta" / "data.json").write_text(json.dumps({"data_hash": hashes.pop()}), encoding="utf-8")
+    (out / "meta" / "data.json").write_text(json.dumps({"data_hash": hashes.pop(), "git_sha": shas.pop()}), encoding="utf-8")
 
 
 def cmd_report(a) -> None:

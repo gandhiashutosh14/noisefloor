@@ -9,7 +9,6 @@ data.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import time
 from dataclasses import asdict, dataclass
@@ -23,13 +22,14 @@ from .agents.wm_agent import WMAgent
 from .audit.envelopes import EnvelopeRecorder, git_sha
 from .config import config_hash, load_json
 from .data.collect import DATA_SEED, LEVELS, build_world, collect, level_key, render, save_meta
-from .data.lake import append_rows, load_probe_arrays, load_training_arrays, write_observations, write_trajectories
+from .data.lake import append_rows, load_probe_arrays, load_training_arrays, trajectory_hash, write_observations, write_trajectories
 from .eval.probes import kstep_error, probe
 from .eval.run import baselines, eval_set, load_world, oracle, result_rows, run_agent, tune_hpa
 from .govern.gate import Gate
-from .models.train import TrainConfig, train
+from .models.train import K, TrainConfig, train
 from .models.train import load as load_model
 from .models.train import save as save_model
+from .tracking import DecisionTracer
 
 
 @dataclass(frozen=True)
@@ -97,18 +97,16 @@ def shard(cells: List[Cell], index: int, count: int) -> List[Cell]:
 def build_lake(lake: Path, cfg: Dict, levels: Iterable = LEVELS) -> Dict:
     t0 = time.perf_counter()
     tr = collect(cfg, seed=DATA_SEED)
-    version = write_trajectories(lake / "trajectories", tr, DATA_SEED)
-    h = hashlib.sha256()
-    for arr in (tr.state, tr.act_vec, tr.action, tr.cost, tr.reset):
-        h.update(np.ascontiguousarray(arr).tobytes())
-    info = {"data_seed": DATA_SEED, "trajectories_version": version, "data_hash": h.hexdigest()[:16],
+    data_hash = trajectory_hash(tr)
+    version = write_trajectories(lake / "trajectories", tr, DATA_SEED, data_hash)
+    info = {"data_seed": DATA_SEED, "trajectories_version": version, "data_hash": data_hash,
             "config_hash": config_hash(cfg), "levels": {}}
     for arm, d in levels:
         world = build_world(tr, cfg, arm, d)
         obs, xi = render(tr, cfg, world)
         key = level_key(arm, d)
         save_meta(lake / "meta" / f"{key}.json", world)
-        info["levels"][key] = write_observations(lake / "observations", key, tr.episode_id, obs, xi)
+        info["levels"][key] = write_observations(lake / "observations", key, tr.episode_id, obs, xi, data_hash)
     info["seconds"] = round(time.perf_counter() - t0, 1)
     (lake / "meta" / "data.json").write_text(json.dumps(info, indent=2), encoding="utf-8")
     return info
@@ -121,7 +119,7 @@ def train_cell(cell: Cell, lake: Path, runs: Path, steps: int = 1200, log=print)
     tc = TrainConfig(variant=cell.variant, z_dim=cell.z_dim, seed=cell.seed, steps=steps)
     params = {**asdict(tc), "level": cell.level, "git_sha": git_sha(), "data_hash": info["data_hash"],
               "delta_trajectories_version": arrays["traj_version"], "delta_observations_version": arrays["obs_version"],
-              "sim_config_hash": info["config_hash"], "K": 4, "M": tc.slices}
+              "sim_config_hash": info["config_hash"], "K": K, "M": tc.slices}
     with tracking.run("noisefloor-train", cell.name, params, tags={"variant": cell.variant, "level": cell.level}) as rid:
         out = train(arrays, tc, logger=lambda s, m: tracking.log_metrics(m, step=s))
         model = out["model"]
@@ -169,21 +167,25 @@ def eval_cell(cell: Cell, lake: Path, runs: Path, cfg: Dict, gate_v1: Gate, log=
         gate = gate_v1
         n = n_eval or eval_days(ev == "ood")
         profiles, ids = eval_set(cfg, n=n, ood=(ev == "ood"))
-        recorder = EnvelopeRecorder(model.variant, ev, cell.seed, cell.arm, cell.d, ids, agent=agent,
+        recorder = EnvelopeRecorder(model.variant, ev, cell.seed, cell.arm, cell.d, ids, agent=agent, z_dim=cell.z_dim,
+                                    policy_id=gate.policy_id,
                                     extra={"mlflow_run_id": meta.get("mlflow_run_id") or "",
                                            "delta_version": info["levels"][cell.level]})
         planned = np.zeros((len(ids), cfg["steps_per_episode"] - 1))
+        label = f"{cell.name}-{ev}"
+        tracer = DecisionTracer(ids[::8], label)           # MLflow spans for 1 in 8 evaluation days
 
         def record(t, i, dec):
             recorder(t, i, dec)
             if agent.last_pred_cost is not None:
                 planned[i, t] = agent.last_pred_cost[i]
+                tracer.record(t, i, ids[i], dec, float(agent.last_pred_cost[i]), float(agent.last_spread[i]))
 
-        label = f"{cell.name}-{ev}"
         with tracking.run("noisefloor-eval", label, {"cell": cell.name, "eval": ev, "train_run_id": meta.get("mlflow_run_id") or ""}):
             t0 = time.perf_counter()
             out = run_agent(agent, cfg, gate, world=world, arm=cell.arm, ood=(ev == "ood"), n=n, record=record)
             secs = time.perf_counter() - t0
+            tracer.flush()
             ratio = _realised_vs_planned(out.costs, planned)
             res = result_rows(out, run=label, model=model.variant, variant=ev, train_seed=cell.seed, arm=cell.arm,
                               d=cell.d, z_dim=cell.z_dim, split="ood" if ev == "ood" else "test", git_sha=git_sha(),

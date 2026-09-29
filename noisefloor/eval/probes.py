@@ -54,7 +54,8 @@ def probe(model: WorldModel, fit: Dict[str, np.ndarray], test: Dict[str, np.ndar
     r2_xi = ridge_r2(z_fit, fit["xi16"], z_te, test["xi16"])
     names = [n for n, k in zip(STATE_PROBE_NAMES, keep) if k]
     out = {"probe_state_r2": float(np.mean(r2_state)), "probe_xi_r2": float(np.mean(r2_xi)),
-           "erank": effective_rank(torch.from_numpy(z_te[:20000]))}
+           "erank": effective_rank(torch.from_numpy(z_te[:20000])),
+           "z_std": float(z_te.std(0).mean())}      # effective rank ignores scale; a shrunk code shows here
     out.update({f"probe_r2_{n}": float(v) for n, v in zip(names, r2_state)})
     return out
 

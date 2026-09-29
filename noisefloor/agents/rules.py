@@ -27,8 +27,10 @@ class Context:
     golden: Dict[str, np.ndarray]      # clean channels, for rule agents and the approver
     actuator: "object"                 # sim.fleet.Actuator
     act_vec: np.ndarray                # (E, 6)
-    mask: np.ndarray                   # (E, 7) gate-allowed actions
+    mask: np.ndarray                   # (E, 7) actions the gate would allow or send for approval now
     true_state: Optional[np.ndarray] = None   # only the oracle reads this
+    limits: Optional[Dict[str, object]] = None   # the gate's limits for planning rollouts (Gate.limits)
+    pending: Optional[np.ndarray] = None         # (E,) a failover request is awaiting the approver
 
 
 def _scale_action(desired: np.ndarray, total: np.ndarray) -> np.ndarray:
@@ -47,10 +49,14 @@ class HPA:
         self.history = [deque(maxlen=self.window) for _ in range(E)]
 
     def desired(self, ctx: Context) -> np.ndarray:
+        """Kubernetes: desired = ceil(current * metric / target), where ``current`` is the replica count
+        the metric was measured on (golden["replicas"]); replicas that became ready after the
+        measurement are counted in ``total`` for the comparison, not in the demand estimate."""
         act = ctx.actuator
         rho = ctx.golden["rho"]
+        measured = ctx.golden.get("replicas", act.r)
         total = act.r + act.pending
-        raw = np.ceil(np.maximum(act.r, 1) * rho / self.target).astype(np.int64)
+        raw = np.ceil(np.maximum(measured, 1) * rho / self.target).astype(np.int64)
         within = np.abs(rho / self.target - 1.0) <= self.tolerance
         rec = np.where(within, total, raw)
         out = np.empty_like(rec)
@@ -113,7 +119,8 @@ class Predictive:
         self.trend = self.beta * (self.level - prev) + (1 - self.beta) * self.trend
         fut = self.profile[min(ctx.t + 2, T - 1)] * (self.level + 2 * self.trend)
         act = ctx.actuator
-        speed = load / np.maximum(ctx.golden["rho"] * np.maximum(act.r, 1), 1e-6)   # per-replica req/s now
+        measured = ctx.golden.get("replicas", act.r)
+        speed = load / np.maximum(ctx.golden["rho"] * np.maximum(measured, 1), 1e-6)   # per-replica req/s measured
         desired = np.ceil(fut / (self.target * np.maximum(speed, 1e-6))).astype(np.int64)
         a = _scale_action(desired, act.r + act.pending)
         return np.stack([a, np.full_like(a, NOOP), np.full_like(a, NOOP)], axis=1)

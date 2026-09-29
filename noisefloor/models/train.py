@@ -76,7 +76,11 @@ class Windows:
         N, T = reset.shape
         starts = []
         for s in range(0, T - WINDOW + 1):
+            # a reset after step t makes frame t+1 inconsistent (its telemetry was measured on the old
+            # replica count), so a window must not contain the transition or start on that frame
             ok = ~reset[:, s:s + WINDOW - 1].any(axis=1)
+            if s > 0:
+                ok &= ~reset[:, s - 1]
             starts.extend((e, s) for e in np.flatnonzero(ok))
         self.starts = np.array(starts, dtype=np.int64)
 

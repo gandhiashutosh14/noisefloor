@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from noisefloor.config import sim_config
-from noisefloor.data.collect import build_world, collect, feature_matrix, render
+from noisefloor.data.collect import build_world, collect, feature_matrix, render, source_variance
 from noisefloor.sim.telemetry import DistractorStream
 
 CFG = sim_config()
@@ -15,15 +15,20 @@ def trajectories():
 
 @pytest.mark.parametrize("arm,d", [("main", 0.5), ("main", 0.8), ("main", 0.95), ("predictable", 0.8), ("isotropic", 0.8)])
 def test_distractor_share_of_variance_matches_d(trajectories, arm, d):
+    """beta is set so that, on the training days, the distractor share of the mean channel variance of the
+    pre-activation signal u is d. The formula is exact for sources of the calibrated variance; the
+    realised share with fresh (heavy-tailed) sources wanders by a few percent."""
     world = build_world(trajectories, CFG, arm, d)
-    phi = feature_matrix(trajectories, CFG).reshape(-1, 12)
-    signal = phi @ world.A.T
-    n = phi.shape[0]
-    xi = np.concatenate([np.stack([s.next() for _ in range(n // 16 + 1)])
-                         for s in [DistractorStream(world.world_seed, 50_000 + e, arm, n=world.k) for e in range(16)]])[:n]
-    noise = world.beta * (xi @ world.Q.T)
-    share = noise.var(0).mean() / (noise.var(0).mean() + signal.var(0).mean())
-    assert abs(share - d) < 0.02
+    phi = feature_matrix(trajectories, CFG)
+    train = np.array([s == "train" for s in trajectories.split])
+    signal_var = (phi[train].reshape(-1, 12) @ world.A.T).var(0).mean()
+    noise_var = world.beta ** 2 * (world.Q ** 2).sum(1).mean() * source_variance(world.world_seed, arm, world.k, trajectories.T)
+    assert abs(noise_var / (noise_var + signal_var) - d) < 1e-6
+    n = phi[train].reshape(-1, 12).shape[0]
+    streams = [DistractorStream(world.world_seed, 50_000 + e, arm, n=world.k) for e in range(64)]
+    xi = np.concatenate([np.stack([s.next() for _ in range(n // 64 + 1)]) for s in streams])[:n]
+    realised = (world.beta * (xi @ world.Q.T)).var(0).mean()
+    assert abs(realised / (realised + signal_var) - d) < 0.05
 
 
 def test_main_arm_is_unpredictable_and_predictable_arm_is_not():

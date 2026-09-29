@@ -6,13 +6,15 @@
 3. A WakeLedger is rebuilt from the log alone.
 4. Every recorded decision is replayed against a stricter catalog (gate-v2: at most 24 replicas, no
    failover) using the arguments recorded at decision time, and the decisions that would flip are
-   listed. The action budget depends on the whole run's history and is not replayed.
+   listed. The new catalog's action budget is replayed too, from the sequence of executed actions in
+   the ledger (a rolling window over the run's own history).
 
 Requires the audit extra (tracewake).
 """
 from __future__ import annotations
 
 import json
+from collections import deque
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -35,16 +37,23 @@ def replay_verdict(gate: Gate, action: str, args: Dict, approved: bool = False) 
 def replay_ledger(ledger, gate_new: Gate) -> Dict:
     flips: List[Dict] = []
     total = executed = 0
+    budget, window = int(gate_new.budget["actions"]), gate_new.window
     for rid in ledger.runs():
-        for env in ledger.envelopes(rid):
+        recent: deque = deque([0] * window, maxlen=window)      # executed non-noop actions, last `window` steps
+        for env in sorted(ledger.envelopes(rid), key=lambda e: e.seq):
             total += 1
             d = env.data
             action = d.get("executed") or "noop"
             if action == "noop":
+                recent.append(0)
                 continue
             executed += 1
             approved = d.get("approval") == "granted"
-            new = replay_verdict(gate_new, action, d.get("args") or {}, approved=approved)
+            if sum(recent) >= budget:
+                new = {"verdict": "deny", "reason": f"action budget of {budget} per {window} steps is used up"}
+            else:
+                new = replay_verdict(gate_new, action, d.get("args") or {}, approved=approved)
+            recent.append(1)
             if new["verdict"] != "allow":
                 flips.append({"run_id": rid, "seq": env.seq, "action": action, "args": d.get("args"),
                               "old": "allow", "new": new["verdict"], "reason": new["reason"]})

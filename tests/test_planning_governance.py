@@ -38,6 +38,36 @@ def test_cem_finds_a_hidden_target_sequence():
     assert (ranked[:, 0] == target[0]).all()
 
 
+def test_cem_ranks_on_the_effective_first_action():
+    """A refused first action is scored as a no-op inside the rollouts, so it must not be ranked as
+    itself: with the mask it is folded into the no-op plan and never handed to the gate."""
+    mask = np.ones((3, 7), dtype=bool)
+    mask[:, [3, 4]] = False
+    flat = lambda seqs: np.zeros(seqs.shape[:2])                       # every plan costs the same
+    ranked, _, _ = cem_plan(3, 7, flat, np.random.default_rng(0), horizon=4, samples=64, first_mask=mask)
+    assert not np.isin(ranked, [3, 4]).any()
+    assert (mask[np.arange(3)[:, None], ranked]).all()
+
+
+def test_gate_limits_agree_with_the_mask_for_a_stricter_catalog():
+    """gate_v2 caps replicas at 24 and has no failover: the mask built from its limits and the gate's
+    own verdicts must agree on every reachable state (v1 is covered by the exhaustive test above)."""
+    gate = Gate.load("gate_v2.json")
+    limits = gate.limits(CFG)
+    assert limits["replicas_max"] == 24 and "failover" not in limits["allowed_actions"]
+    rng = np.random.default_rng(2)
+    act = new_actuator(rng.integers(2, 25, 16), CFG, budget_window=gate.window)
+    for _ in range(40):
+        m = allowed_mask(act, CFG, limits)
+        for i in range(16):
+            for a, name in enumerate(ACTIONS):
+                assert (gate.check(name, act, i, CFG, approved=True).verdict == "allow") == bool(m[i, a]), (i, name)
+        choice = np.array([rng.choice(np.flatnonzero(row)) for row in m])
+        apply_actions(act, choice, CFG)
+        advance_time(act)
+    assert (act.r + act.pending <= 24).all()
+
+
 def test_cem_rollouts_respect_the_gate_mask():
     act = new_actuator(np.array([39]), CFG)                     # scale-ups over 40 are refused
     U, A, _ = rollout_actuator(act, np.full((1, 4), UP6), CFG)
@@ -121,12 +151,63 @@ def test_hpa_desired_replicas_match_kubernetes(r, rho, expected):
     assert int(hpa.desired(_ctx(r, rho))[0]) == expected
 
 
+def test_hpa_uses_the_replica_count_the_metric_was_measured_on():
+    """Utilisation 0.9 was measured on 10 replicas; 6 more have just become ready. Kubernetes sizes
+    the demand from the 10 (ceil(10 * 0.9 / 0.6) = 15 <= 16 ready: no change), not from the 16."""
+    hpa = HPA(0.6, 1)
+    hpa.reset(1, CFG)
+    ctx = _ctx(16, 0.9)
+    ctx.golden["replicas"] = np.array([10])
+    assert int(hpa.desired(ctx)[0]) == 15
+    assert int(hpa.propose(ctx)[0, 0]) == NOOP
+    del ctx.golden["replicas"]                               # the v0.1 behaviour: 16 x 0.9 / 0.6 -> 24, scale up again
+    hpa.reset(1, CFG)
+    assert int(hpa.desired(ctx)[0]) == 24 and int(hpa.propose(ctx)[0, 0]) == UP6
+
+
 def test_hpa_scale_down_stabilisation_window():
     hpa = HPA(0.6, 3)
     hpa.reset(1, CFG)
     hpa.desired(_ctx(10, 0.9))                      # recommends 15
     assert int(hpa.desired(_ctx(10, 0.3))[0]) == 10  # would be 5, held at current by the recent 15
 
+
+
+def test_harness_records_every_candidate_and_the_request():
+    """On an incident day the runbook proposes failover first; the record must keep the needs-approval
+    verdict of that candidate and mark the request, not just the action that ran."""
+    from noisefloor.agents.rules import Runbook
+    from noisefloor.eval.harness import run_episodes
+    from noisefloor.sim.loads import make_profile
+    profiles = [make_profile("incident", np.random.default_rng([5, i]), CFG) for i in range(2)]
+    out = run_episodes(Runbook(0.7, 1), profiles, [1, 2], np.full(2, 10), CFG, Gate.load("gate_v1.json"), keep_decisions=True)
+    requests = [d for d in out.decisions if d["requested"]]
+    assert requests, "the runbook never filed a failover request on an incident day"
+    d = requests[0]
+    assert d["candidates"][0] == {"action": "failover", "verdict": "needs-approval", "reason": d["candidates"][0]["reason"]}
+    assert d["proposed"][0] == "failover" and d["executed"] != "failover"
+    granted = [d for d in out.decisions if d["approval"] == "granted"]
+    assert granted and granted[0]["executed"] == "failover"
+    assert sum(r.requests for r in out.results) >= len(granted) and sum(r.failovers for r in out.results) == len(granted)
+
+
+def test_replay_applies_the_new_catalogs_action_budget():
+    from noisefloor.audit.replay import replay_ledger
+
+    class Env:
+        def __init__(self, seq, executed):
+            self.seq, self.data = seq, {"executed": executed, "args": {"replicas_after": 12}, "approval": None}
+
+    class Ledger:
+        def runs(self):
+            return ["r"]
+
+        def envelopes(self, rid):
+            return [Env(s + 1, "scale_up_2") for s in range(8)]
+
+    rep = replay_ledger(Ledger(), Gate.load("gate_v1.json"))       # budget 6 per 12 steps
+    assert rep["executed_non_noop"] == 8 and rep["flips"] == 2
+    assert all("budget" in f["reason"] for f in rep["examples"])
 
 
 # ------------------------------------------------------------------------------------------ stats
@@ -153,7 +234,8 @@ def test_tost_holm_iqm_and_seed_interval():
 # ------------------------------------------------------------------------------------------ audit
 def test_envelope_shape_and_ids():
     rid = run_id("jepa", "main", 3, "main", 0.8, 100004)
-    assert rid == "jepa-main-s3-main-d80-e100004"
+    assert rid == "jepa-main-s3-main-d80-z16-e100004"
+    assert run_id("recon", "ood", 0, "isotropic", 0.8, 200001, z_dim=32) == "recon-ood-s0-isotropic-d80-z32-e200001"
     d = envelope_dict(rid, 0, 100004, {"proposed": ["scale_up_2"], "executed": "scale_up_2", "verdict": "allow",
                                        "effect": "reversible", "args": {"replicas_after": 12}}, sha="abc1234")
     assert d["seq"] == 1 and d["type"] == "decision" and d["policy_id"] == "gate-v1"

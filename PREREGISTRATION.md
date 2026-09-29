@@ -137,3 +137,32 @@ Each change fixed a failure the diagnostics exposed:
 
 **Cut from the design spec.** The governance-off ablation (the simulator enforces the gate's
 constraints) and the goal-embedding, MPPI and surprise-fallback ablations.
+
+## 7. Notes added after the run (2026-09-30)
+
+Added after the confirmatory run and the code review of 2026-09-29; nothing above this section was changed.
+
+- **"The spec"** referred to throughout section 6 is the pre-build design document, now committed unchanged as
+  `docs/DESIGN_SPEC.md` (local paths removed). Its section 14 holds the headroom gate and the one permitted change.
+- **Numbers in section 6 without a committed file:** the headroom check (runbook 295.6, oracle 220.9), the smoke-run
+  costs (741, 1,467, 374), check 1's Huber-head predictions (3.2-4.1 for 6.2) and the predictable arm's 0.82 share
+  were read from console output that was not saved. They are reported as remembered from that output, not as
+  reproducible artifacts. Everything in the tables of section 6 is in `reports/pilot/`.
+- **"The planner drove the fleet to 2-3 replicas"** (check 3) overstates it: the main checks averaged 10-11
+  replicas; only the horizon-2 planner variant fell to 2.5. The accurate description is that the planner
+  under-provisioned (815 sheds and 295 scale-downs against 152 scale-ups over 16 days).
+- **The isotropic-arm probe figures** (0.064 / 0.038 in round 3) come from a probe onto the first 16 of 128
+  sources, which see one eighth of that arm's noise; they say little about how much noise the latent holds
+  there. The claim that a reconstruction bottleneck discards isotropic noise "for free" is not supported by
+  that probe.
+- **The behaviour policy** also attempts a failover on 20% of the steps of an incident, when the gate allows
+  it, so that failovers appear in the offline data. Section 2 omitted this.
+- **What d measures.** The distractor share is calibrated on the pre-activation signal over the behaviour-data
+  states; the z-scored model input carries a higher share (about 0.06 / 0.65 / 0.84 / 0.94 at nominal
+  0 / 0.5 / 0.8 / 0.95). See RESULTS.md, "What d measures".
+- **Report labelling.** The report code at the tag ignored the registered direction of the secondary tests and did
+  not apply the Holm adjustment to the verdicts; RESULTS.md was re-rendered with corrected labels and unchanged
+  numbers. The registered rule in section 4 is what the corrected code implements.
+- **Baseline bugs found in review** (a stale replica count in HPA's demand estimate; an approver that grants
+  failover on overload) affect the reference agents, not the learned ones; corrected reference numbers are in
+  RESULTS.md as post-registration analysis.

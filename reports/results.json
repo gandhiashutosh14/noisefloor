@@ -1,7 +1,7 @@
 {
-  "generated": "2026-09-28",
+  "generated": "2026-09-29 18:54 UTC",
   "prereg_tag": "prereg-v1",
-  "command": "/opt/hostedtoolcache/Python/3.11.16/x64/bin/noisefloor report --lake lake-all --out rendered --prereg prereg-v1",
+  "command": "noisefloor report --lake lake-all --out . --prereg prereg-v1  (re-rendered on 2026-09-30 from the run's tables with the v0.2 report code; numbers unchanged, labels corrected)",
   "git_sha": "c90c402",
   "data_hash": [
     "c1565fe2e1f02689"
@@ -255,7 +255,7 @@
         "mean": -38.487109374999946,
         "lo": -56.22024102802986,
         "hi": -20.75397772197003,
-        "p_two_sided": 0.0013505584252158779
+        "p_two_sided": 0.0013505584252158785
       },
       "win": true,
       "loss": false
@@ -344,7 +344,9 @@
         },
         "win": true,
         "loss": false,
-        "p_holm": 0.0
+        "p_holm": 0.0,
+        "direction": -1,
+        "verdict": "supported"
       },
       "jepa_vs_recon_d95": {
         "bootstrap": {
@@ -361,7 +363,9 @@
         },
         "win": true,
         "loss": false,
-        "p_holm": 0.0
+        "p_holm": 0.0,
+        "direction": -1,
+        "verdict": "supported"
       },
       "jepa_vs_ema_d80": {
         "bootstrap": {
@@ -378,7 +382,9 @@
         },
         "win": false,
         "loss": true,
-        "p_holm": 0.0116
+        "p_holm": 0.0116,
+        "direction": 0,
+        "verdict": "reference lower (no direction was registered)"
       },
       "jepa_vs_costonly_d80": {
         "bootstrap": {
@@ -395,7 +401,9 @@
         },
         "win": false,
         "loss": true,
-        "p_holm": 0.0
+        "p_holm": 0.0,
+        "direction": -1,
+        "verdict": "reversed"
       },
       "did_predictable_minus_main": {
         "bootstrap": {
@@ -412,7 +420,9 @@
         },
         "win": false,
         "loss": false,
-        "p_holm": 0.0838
+        "p_holm": 0.0838,
+        "direction": 1,
+        "verdict": "not supported (interval includes 0)"
       },
       "jepa_vs_recon_isotropic_d80": {
         "bootstrap": {
@@ -429,7 +439,9 @@
         },
         "win": true,
         "loss": false,
-        "p_holm": 0.0
+        "p_holm": 0.0,
+        "direction": -1,
+        "verdict": "supported"
       }
     }
   },
@@ -1193,13 +1205,137 @@
       "lo": 21.91859374999991,
       "hi": 60.64091145833345,
       "p_two_sided": 0.0
-    }
+    },
+    "h8_same_seeds": {
+      "mean": 295.4343750000001,
+      "lo": 264.3215885416668,
+      "hi": 327.8826041666666,
+      "p_two_sided": 0.0
+    },
+    "seeds": 3
   },
+  "exploratory": [
+    {
+      "model": "jepa",
+      "cell": "d = 0.8, latent 8",
+      "seeds": 3,
+      "J": {
+        "mean": 293.8406250000001,
+        "lo": 261.9321875000001,
+        "hi": 326.87140625000006,
+        "p_two_sided": 0.0
+      }
+    },
+    {
+      "model": "jepa",
+      "cell": "d = 0.8, latent 32",
+      "seeds": 3,
+      "J": {
+        "mean": 297.10520833333345,
+        "lo": 262.57164062500016,
+        "hi": 333.317265625,
+        "p_two_sided": 0.0
+      }
+    },
+    {
+      "model": "jepa",
+      "cell": "predictable noise, d = 0.8",
+      "seeds": 5,
+      "J": {
+        "mean": 301.38500000000005,
+        "lo": 268.16426562500016,
+        "hi": 340.6529687499999,
+        "p_two_sided": 0.0
+      }
+    },
+    {
+      "model": "jepa",
+      "cell": "isotropic noise (128 sources), d = 0.8",
+      "seeds": 5,
+      "J": {
+        "mean": 284.86625000000015,
+        "lo": 258.5277500000001,
+        "hi": 312.3472500000001,
+        "p_two_sided": 0.0
+      }
+    },
+    {
+      "model": "recon",
+      "cell": "d = 0.8, latent 8",
+      "seeds": 3,
+      "J": {
+        "mean": 400.3625000000001,
+        "lo": 366.3304687500002,
+        "hi": 434.9335416666667,
+        "p_two_sided": 0.0
+      }
+    },
+    {
+      "model": "recon",
+      "cell": "d = 0.8, latent 32",
+      "seeds": 3,
+      "J": {
+        "mean": 265.9895833333333,
+        "lo": 239.66023437500004,
+        "hi": 294.28177083333327,
+        "p_two_sided": 0.0
+      }
+    },
+    {
+      "model": "recon",
+      "cell": "predictable noise, d = 0.8",
+      "seeds": 5,
+      "J": {
+        "mean": 376.0400000000001,
+        "lo": 341.4165937500001,
+        "hi": 410.77200000000016,
+        "p_two_sided": 0.0
+      }
+    },
+    {
+      "model": "recon",
+      "cell": "isotropic noise (128 sources), d = 0.8",
+      "seeds": 5,
+      "J": {
+        "mean": 306.39625000000007,
+        "lo": 276.0804375000001,
+        "hi": 338.67823437500005,
+        "p_two_sided": 0.0
+      }
+    }
+  ],
   "realised_over_planned": {
     "costonly": 1.1469082509438782,
     "ema": 1.100532350119574,
     "jepa": 1.146513567185724,
     "lambda0": 1.6490306471033063,
     "recon": 1.2466018726250068
+  },
+  "planning_latency": {
+    "costonly": {
+      "p50_ms": 2.4456654562499125,
+      "p99_ms": 2.76514595187493,
+      "environments": 32
+    },
+    "ema": {
+      "p50_ms": 2.897575249999562,
+      "p99_ms": 3.0445926277499527,
+      "environments": 32
+    },
+    "jepa": {
+      "p50_ms": 2.7373714687499717,
+      "p99_ms": 2.906008767031212,
+      "environments": 32
+    },
+    "lambda0": {
+      "p50_ms": 2.6272609812501457,
+      "p99_ms": 2.770390357500843,
+      "environments": 32
+    },
+    "recon": {
+      "p50_ms": 2.628681523437759,
+      "p99_ms": 2.7852770232022017,
+      "environments": 32
+    }
   }
 }

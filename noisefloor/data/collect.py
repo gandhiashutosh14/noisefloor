@@ -117,9 +117,13 @@ def build_world(tr: Trajectories, cfg: Dict, arm: str, d: float, world_seed: int
 
 
 def source_variance(world_seed: int, arm: str, k: int, T: int, n_streams: int = 32) -> float:
-    """Mean variance of the distractor sources over day-long streams (calibration ids 900000+, never
-    used for training or evaluation). Slow sources (random walks) exceed unit variance within a day, so
-    beta is calibrated on what a day of the arm actually looks like."""
+    """Mean variance of the distractor sources. The main and isotropic arms are unit-variance by
+    construction (standardised Student-t, bursts and stationary AR(1)), and their heavy tails make a
+    sample estimate wander by several percent, so the analytic value is used. The predictable arm's
+    resetting random walks are not unit-variance within a day, so it is calibrated on day-long
+    streams (calibration ids 900000+, never used for training or evaluation)."""
+    if arm != "predictable":
+        return 1.0
     xs = []
     for e in range(n_streams):
         s = DistractorStream(world_seed, 900_000 + e, arm, n=k)

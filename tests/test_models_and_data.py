@@ -68,6 +68,26 @@ def test_windows_skip_behaviour_resets(lake):
     win = Windows(arr)
     for e, s in win.starts[:500]:
         assert not arr["reset"][e, s:s + WINDOW - 1].any()
+        assert s == 0 or not arr["reset"][e, s - 1]           # the frame after a reset is inconsistent
+    synthetic = {k: np.zeros((1, 40) + (v.shape[2:] if v.ndim > 2 else ()), dtype=v.dtype) for k, v in arr.items() if isinstance(v, np.ndarray) and v.ndim >= 2}
+    synthetic["reset"][0, 5] = True
+    starts = set(map(tuple, Windows(synthetic).starts.tolist()))
+    assert (0, 6) not in starts and (0, 5) not in starts and (0, 7) in starts
+
+
+def test_rebuilding_a_level_replaces_it_and_mismatched_hashes_are_refused(lake, tmp_path):
+    from noisefloor.data.lake import write_observations, write_trajectories
+    path, tr, obs, _ = lake
+    p = tmp_path / "lake2"
+    write_trajectories(p / "trajectories", tr, 5, data_hash="aaaa")
+    xi = np.zeros((obs.shape[0], obs.shape[1], 16), np.float32)
+    write_observations(p / "observations", "main_d80", tr.episode_id, obs, xi, data_hash="aaaa")
+    write_observations(p / "observations", "main_d80", tr.episode_id, obs, xi, data_hash="aaaa")   # rebuilt in place
+    arr = load_training_arrays(p, "main_d80")
+    assert arr["obs"].shape[0] == sum(s == "train" for s in tr.split)
+    write_trajectories(p / "trajectories", tr, 5, data_hash="bbbb")
+    with pytest.raises(ValueError, match="rebuild the lake"):
+        load_training_arrays(p, "main_d80")
 
 
 @pytest.mark.parametrize("variant", ["jepa", "lambda0", "ema", "recon", "costonly"])

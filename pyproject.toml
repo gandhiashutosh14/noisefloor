@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "noisefloor"
-version = "0.1.0a1"
+version = "0.2.0a1"
 description = "A governed SRE autoscaling agent that plans inside a JEPA latent world model, with a pre-registered test of how planning holds up as telemetry turns into noise. CPU only."
 readme = "README.md"
 requires-python = ">=3.11"

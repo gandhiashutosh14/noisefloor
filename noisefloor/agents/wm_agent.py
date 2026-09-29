@@ -8,9 +8,12 @@ predictor's context, and scores candidate 8-step action sequences by
 known() is the exact replica, shed, warm and failover cost; R is the learned violation risk.
 
 The actuator state u (replicas, pending, shed, cooldowns, lockout, action budget) is known exactly,
-so it is rolled forward with the simulator's own actuator code: an action the gate would refuse at
-step h becomes a noop at step h, exactly as it would in the real loop. A failover chosen at step h
-is filed for approval and takes effect at h + 1 (the approver's one-step delay).
+so it is rolled forward with the simulator's own actuator code under the gate's limits: an action the
+gate would refuse at step h is scored as a no-op at step h. The ranking of first actions is done on
+the effective action for the same reason (see plan.cem.cem_plan). A failover chosen at step h is
+filed for approval and takes effect at h + 1 (the approver's one-step delay); the rollout scores the
+filing step as a no-op, while the real loop runs the agent's next-best candidate during that step and
+assumes the request is granted. Both simplifications are documented deviations, not modelled.
 
 The agent never sees the true state or the clean golden channels. It returns the three best distinct
 first actions; the harness passes them through the gate in order.
@@ -28,9 +31,10 @@ from ..sim.fleet import FAILOVER, N_ACTIONS, NOOP, advance_time, allowed_mask, a
 from .rules import Context
 
 
-def rollout_actuator(actuator, seqs: np.ndarray, cfg: Dict):
+def rollout_actuator(actuator, seqs: np.ndarray, cfg: Dict, limits: Optional[Dict[str, object]] = None):
     """seqs (N, H) proposed actions -> (U (N, H, 6) actuator features before each step, A (N, H) the
-    actions that would actually execute, C (N, H) their exactly known cost)."""
+    actions that would actually execute under ``limits`` (the gate's; the simulator's by default),
+    C (N, H) their exactly known cost)."""
     N, H = seqs.shape
     act = actuator.copy()
     U = np.zeros((N, H, 6), np.float32)
@@ -40,7 +44,7 @@ def rollout_actuator(actuator, seqs: np.ndarray, cfg: Dict):
     rows = np.arange(N)
     for h in range(H):
         U[:, h] = act.vector(cfg)
-        mask = allowed_mask(act, cfg)
+        mask = allowed_mask(act, cfg, limits)
         a = seqs[:, h]
         ok = mask[rows, a]
         eff = np.where(ok, a, NOOP)
@@ -93,7 +97,7 @@ class WMAgent:
         def score(seqs: np.ndarray) -> np.ndarray:                             # (E, n, H) -> (E, n)
             n = seqs.shape[1]
             hist = self.hist.repeat_interleave(n, dim=0)
-            U, A, C = rollout_actuator(ctx.actuator.repeat(n), seqs.reshape(E * n, H), self.cfg)
+            U, A, C = rollout_actuator(ctx.actuator.repeat(n), seqs.reshape(E * n, H), self.cfg, ctx.limits)
             Ut, At = torch.from_numpy(U), torch.from_numpy(A)
             z_img = self.model.rollout(hist, Ut[:, :-1], At[:, :-1])          # z_1 .. z_{H-1}
             zs = torch.cat([hist[:, -1:], z_img], dim=1)                      # z_0 .. z_{H-1}
@@ -103,7 +107,7 @@ class WMAgent:
 
         init = None if self.p is None else shift(self.p)
         ranked, spread, self.p = cem_plan(E, N_ACTIONS, score, self.rng, horizon=H, samples=S, elites=self.el,
-                                          iterations=self.it, init=init)
+                                          iterations=self.it, init=init, first_mask=ctx.mask)
         self.last_spread = spread
         self.last_pred_cost = score(self.p.argmax(-1)[:, None, :])[:, 0]      # cost of the most likely plan
         return ranked

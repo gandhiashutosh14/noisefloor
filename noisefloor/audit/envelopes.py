@@ -39,8 +39,10 @@ def git_sha() -> str:
         return "uncommitted"
 
 
-def run_id(model: str, variant: str, seed: int, arm: str, d: float, episode: int) -> str:
-    return f"{model}-{variant}-s{seed}-{arm}-d{int(round(d * 100)):02d}-e{episode}"
+def run_id(model: str, variant: str, seed: int, arm: str, d: float, episode: int, z_dim: int = 16) -> str:
+    """One run per (model, evaluation variant, seed, arm, level, latent width, day); the width is part
+    of the id so that two widths of one model can share a topic without colliding in the ledger."""
+    return f"{model}-{variant}-s{seed}-{arm}-d{int(round(d * 100)):02d}-z{z_dim}-e{episode}"
 
 
 def sim_timestamp(episode: int, t: int, step_seconds: int = 300) -> str:
@@ -54,7 +56,8 @@ def envelope_dict(rid: str, t: int, episode: int, decision: Dict[str, Any], *, s
     data = {"proposed": decision.get("proposed"), "executed": decision.get("executed"),
             "effect_class": decision.get("effect"), "args": decision.get("args") or {},
             "verdict": decision.get("verdict"), "reason": decision.get("reason") or "",
-            "approval": decision.get("approval")}
+            "approval": decision.get("approval"), "requested": bool(decision.get("requested", False)),
+            "candidates": decision.get("candidates") or []}
     data.update(extra or {})
     return {"run_id": rid, "seq": t + 1, "ts": sim_timestamp(episode, t), "type": EVENT_TYPE, "data": data,
             "policy_id": policy_id, "producer": f"noisefloor/agent@{sha}", "envelope_version": "1"}
@@ -71,10 +74,11 @@ class EnvelopeRecorder:
     """Collects envelope dicts from the harness's ``record(t, i, decision)`` callback."""
 
     def __init__(self, model: str, variant: str, seed: int, arm: str, d: float, episode_ids: List[int],
-                 agent=None, sha: Optional[str] = None, extra: Optional[Dict[str, Any]] = None):
-        self.ids = [run_id(model, variant, seed, arm, d, e) for e in episode_ids]
+                 agent=None, sha: Optional[str] = None, extra: Optional[Dict[str, Any]] = None, z_dim: int = 16,
+                 policy_id: str = "gate-v1"):
+        self.ids = [run_id(model, variant, seed, arm, d, e, z_dim) for e in episode_ids]
         self.episode_ids = episode_ids
-        self.agent, self.sha, self.extra = agent, sha or git_sha(), extra or {}
+        self.agent, self.sha, self.extra, self.policy_id = agent, sha or git_sha(), extra or {}, policy_id
         self.rows: List[Dict[str, Any]] = []
 
     def __call__(self, t: int, i: int, decision: Dict[str, Any]) -> None:
@@ -82,7 +86,8 @@ class EnvelopeRecorder:
         if self.agent is not None and getattr(self.agent, "last_pred_cost", None) is not None:
             extra["predicted_cost"] = round(float(self.agent.last_pred_cost[i]), 4)
             extra["elite_spread"] = round(float(self.agent.last_spread[i]), 4)
-        self.rows.append(envelope_dict(self.ids[i], t, self.episode_ids[i], decision, sha=self.sha, extra=extra))
+        self.rows.append(envelope_dict(self.ids[i], t, self.episode_ids[i], decision, sha=self.sha,
+                                       policy_id=self.policy_id, extra=extra))
 
     def publish(self, bus, topic: str = "noisefloor.decisions") -> int:
         """Publish every envelope to a TRACEWAKE bus (MemoryBus or the Kafka/AutoMQ bus)."""

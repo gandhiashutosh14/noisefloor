@@ -79,12 +79,17 @@ def baselines(cfg: Dict, gate: Gate, tuned: Optional[Dict] = None) -> Dict[str, 
 
 
 def run_agent(agent, cfg: Dict, gate: Gate, *, world: Optional[TelemetryWorld] = None, arm: str = "main",
-              ood: bool = False, n: int = 16, record=None, keep_decisions: bool = False) -> RunOutput:
+              ood: bool = False, n: Optional[int] = None, record=None, keep_decisions: bool = False,
+              approver_health: bool = False) -> RunOutput:
+    """Run an agent on the evaluation days (all of them by default, per configs/grid.json)."""
+    if n is None:
+        from ..grid import eval_days
+        n = eval_days(ood)
     profiles, ids = eval_set(cfg, n=n, ood=ood)
     if isinstance(agent, OracleMPC) or getattr(agent, "name", "") == "oracle":
         agent.profiles = profiles
     return run_episodes(agent, profiles, ids, np.full(len(ids), R0), cfg, gate, world=world, arm=arm,
-                        record=record, keep_decisions=keep_decisions)
+                        record=record, keep_decisions=keep_decisions, approver_health=approver_health)
 
 
 def oracle(cfg: Dict, seed: int = 1, ood: bool = False, n: int = 16) -> OracleMPC:
@@ -100,5 +105,6 @@ def result_rows(out: RunOutput, **tags) -> List[Dict]:
     return [{**tags, "episode_id": r.episode_id, "family": r.family, "J": r.J,
              "violation_min": 5 * r.violation_steps, "replica_hours": r.replica_steps * 5 / 60,
              "shed_frac": r.shed_mean, "failovers": r.failovers, "denials": r.denials, "approvals": r.approvals,
-             "requests": r.requests, "churn": r.churn, "plan_ms_p50": r.plan_ms_p50, "plan_ms_p99": r.plan_ms_p99}
+             "requests": r.requests, "refused_approvals": r.refused_approvals, "churn": r.churn,
+             "plan_ms_p50": r.plan_ms_p50, "plan_ms_p99": r.plan_ms_p99}
             for r in out.results]

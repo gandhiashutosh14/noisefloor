@@ -6,12 +6,20 @@ Physics per step (all arrays shape (E,)):
     queue      q'    = max(0, q + 300 (lam_s - kappa))       requests waiting
     latency    l95   = S_eff + 3 W_q + q' / kappa            (Sakasegawa L_q, Little's law, x3 for p95)
                W_q   = rho~^sqrt(2(r+1)) / ((1 - rho~) lam_s),  rho~ = min(rho, 0.98)
-    errors     e     = 0.05 (1 - h) + 0.2 sigmoid(40 (rho - 1.05))
-    cost       c_t   = 0.05 (r + pending) + 1.0 [l95 > 250 ms or e > 1%] + 2.0 shed + 0.1 [warm] + 20 [failover]
+    errors     e     = 0.05 (1 - h) + 0.2 sigmoid(40 (rho - 1.05)) + dropped
+    cost       c_t   = 0.05 (r + pending) + 5.0 [l95 > 250 ms or e > 1%] + 2.0 shed + 0.1 [warm] + 20 [failover]
 
 The actuator state (replicas ready and pending, shed, cooldowns, lockout, action budget) is known
 exactly to every controller; `allowed_mask` and `apply_actions` are shared by the environment, the
-governance gate and the planner's rollouts so all three agree on what an action does.
+governance gate and the planner's rollouts so all three agree on what an action does. The physical
+limits (replica bounds, warm-up of exactly two steps, shed cap) live in sim.json; a gate catalog can
+only tighten them, through the `limits` argument of `allowed_mask` (see govern.gate.Gate.limits).
+
+Telemetry semantics: the state reported at decision time t is the measurement of the step that has
+just ended (utilisation, latency and errors computed on the replicas that served it) plus the current
+actuator, in which replicas that finished warming up during that step are already counted. The
+replica count a measurement was made on is kept as ``last["replicas"]`` for controllers that scale
+on utilisation.
 """
 from __future__ import annotations
 
@@ -68,29 +76,48 @@ class Actuator:
         ], axis=1).astype(np.float32)
 
 
-def new_actuator(r0: np.ndarray, cfg: Dict) -> Actuator:
+def new_actuator(r0: np.ndarray, cfg: Dict, budget_window: Optional[int] = None) -> Actuator:
+    """Fresh actuator state. ``budget_window`` (steps) defaults to the simulator's; a gate catalog
+    that declares its own window passes it here so the budget it enforces is the one it records."""
+    if cfg.get("warmup_steps", 2) != 2:
+        raise ValueError("the replica warm-up pipeline is two steps (p1, p2); sim.json warmup_steps must be 2")
     E = len(r0)
     return Actuator(
         r=np.asarray(r0, dtype=np.int64).copy(), p1=np.zeros(E, np.int64), p2=np.zeros(E, np.int64),
         shed=np.zeros(E), shed_expiry=np.zeros((E, cfg["shed_restore_steps"])),
         since_warm=np.full(E, 10 * cfg["cache_warm_every"], np.int64), lockout=np.zeros(E, np.int64),
-        failovers=np.zeros(E, np.int64), recent=np.zeros((E, cfg["budget_window"]), np.int64))
+        failovers=np.zeros(E, np.int64), recent=np.zeros((E, budget_window or cfg["budget_window"]), np.int64))
 
 
-def allowed_mask(act: Actuator, cfg: Dict) -> np.ndarray:
-    """(E, 7) bool: which actions the gate's constraints and the action budget permit right now.
-    Approval for failover is separate (the gate returns needs-approval, not allow)."""
+def physical_limits(cfg: Dict) -> Dict[str, object]:
+    """The simulator's own limits in the form `allowed_mask` takes; a gate's limits tighten these."""
+    return {"replicas_max": cfg["replicas_max"], "replicas_min": cfg["replicas_min"],
+            "cache_warm_every": cfg["cache_warm_every"], "shed_max": cfg["shed_max"],
+            "failovers_per_day": cfg["failovers_per_day"], "budget_actions": cfg["budget_actions"],
+            "allowed_actions": frozenset(ACTIONS)}
+
+
+def allowed_mask(act: Actuator, cfg: Dict, limits: Optional[Dict[str, object]] = None, budget: bool = True) -> np.ndarray:
+    """(E, 7) bool: which actions the limits and the action budget permit right now. ``limits`` defaults
+    to the simulator's physical limits; the governance gate supplies its own (Gate.limits) so that
+    planners, the harness and the gate agree. Approval for failover is separate (the gate returns
+    needs-approval, not allow). ``budget=False`` leaves the action budget out (physics only)."""
+    lim = physical_limits(cfg) if limits is None else limits
     E = len(act.r)
     total = act.r + act.pending
     m = np.ones((E, N_ACTIONS), dtype=bool)
-    m[:, UP2] = total + 2 <= cfg["replicas_max"]
-    m[:, UP6] = total + 6 <= cfg["replicas_max"]
-    m[:, DOWN2] = act.r - 2 >= cfg["replicas_min"]
-    m[:, WARM] = act.since_warm >= cfg["cache_warm_every"]
-    m[:, SHED] = act.shed + cfg["shed_step"] <= cfg["shed_max"] + 1e-9
-    m[:, FAILOVER] = (act.lockout == 0) & (act.failovers < cfg["failovers_per_day"])
-    over = act.budget_used >= cfg["budget_actions"]
-    m[over, 1:] = False
+    m[:, UP2] = total + 2 <= lim["replicas_max"]
+    m[:, UP6] = total + 6 <= lim["replicas_max"]
+    m[:, DOWN2] = act.r - 2 >= lim["replicas_min"]
+    m[:, WARM] = act.since_warm >= lim["cache_warm_every"]
+    m[:, SHED] = act.shed + cfg["shed_step"] <= lim["shed_max"] + 1e-9
+    m[:, FAILOVER] = (act.lockout == 0) & (act.failovers < lim["failovers_per_day"])
+    for j, name in enumerate(ACTIONS):
+        if name not in lim["allowed_actions"]:
+            m[:, j] = False
+    if budget:
+        over = act.budget_used >= lim["budget_actions"]
+        m[over, 1:] = False
     return m
 
 
@@ -137,7 +164,7 @@ def physics(load: np.ndarray, r: np.ndarray, cache: np.ndarray, health: np.ndarr
     # clients time out: backlog beyond `timeout_s` of capacity is dropped and counted as errors
     q_max = cfg["timeout_s"] * kappa
     q_next = np.minimum(q_raw, q_max)
-    dropped = (q_raw - q_next) / (cfg["step_seconds"] * np.maximum(lam_s, 1e-6))
+    dropped = (q_raw - q_next) / np.maximum(cfg["step_seconds"] * np.maximum(lam_s, 1e-6), 1e-9)
     rho_t = np.minimum(rho, cfg["rho_cap"])
     wq = rho_t ** np.sqrt(2.0 * (r + 1.0)) / ((1.0 - rho_t) * np.maximum(lam_s, 1e-6))
     p95_ms = 1000.0 * (1.0 / speed + 3.0 * wq + q_next / kappa)
@@ -173,13 +200,13 @@ class Fleet:
     last: Dict[str, np.ndarray] = field(default_factory=dict)
 
     @classmethod
-    def start(cls, profiles: List[LoadProfile], r0: np.ndarray, cfg: Dict) -> "Fleet":
+    def start(cls, profiles: List[LoadProfile], r0: np.ndarray, cfg: Dict, budget_window: Optional[int] = None) -> "Fleet":
         E = len(profiles)
-        f = cls(cfg=cfg, profiles=profiles, act=new_actuator(np.asarray(r0), cfg))
+        f = cls(cfg=cfg, profiles=profiles, act=new_actuator(np.asarray(r0), cfg, budget_window))
         f.queue = np.zeros(E)
         f.cache = np.full(E, 0.5)
         f.failed_over = np.zeros(E, dtype=bool)
-        f._measure(np.zeros(E, dtype=int))
+        f._measure()
         return f
 
     @property
@@ -199,10 +226,12 @@ class Fleet:
         T = self.cfg["steps_per_episode"]
         return np.array([p.load[min(t, T - 1)] for p in self.profiles])
 
-    def _measure(self, _a) -> None:
+    def _measure(self) -> None:
+        """The first frame: a steady-state reading of the current load on the current replicas, with
+        no backlog (a step of zero length, so nothing queues or is dropped)."""
         h = self.health()
-        ph = physics(self.load(), self.act.r, self.cache, h, self.act.shed, self.queue, self.cfg)
-        self.last = {"load": self.load(), "health": h, **ph}
+        ph = physics(self.load(), self.act.r, self.cache, h, self.act.shed, self.queue, {**self.cfg, "step_seconds": 0})
+        self.last = {"load": self.load(), "health": h, "replicas": self.act.r.copy(), **ph}
 
     def true_state(self) -> np.ndarray:
         """(E, 8): load, queue, replicas, pending, cache, health, p95_ms, error_rate."""
@@ -211,18 +240,21 @@ class Fleet:
                          L["p95_ms"], L["error_rate"]], axis=1).astype(np.float64)
 
     def golden(self) -> Dict[str, np.ndarray]:
-        """Clean utilisation, latency and error rate: read only by rule baselines and the approver."""
+        """Clean channels, read only by rule baselines and the approver: utilisation, latency, error rate,
+        load and region health of the step just ended, and the replica count that measurement was made on."""
         return {"rho": self.last["rho"].copy(), "p95_ms": self.last["p95_ms"].copy(),
-                "error_rate": self.last["error_rate"].copy(), "load": self.last["load"].copy()}
+                "error_rate": self.last["error_rate"].copy(), "load": self.last["load"].copy(),
+                "health": self.last["health"].copy(), "replicas": self.last["replicas"].copy()}
 
     def step(self, actions: np.ndarray) -> Dict[str, np.ndarray]:
-        """Apply one action per environment (must be allowed), then advance one 5-minute step."""
+        """Apply one action per environment (must be physically possible), then advance one 5-minute step.
+        Returns the step's cost, the violation flag, the shed level that was billed and the action flags."""
         cfg = self.cfg
         a = np.asarray(actions)
-        mask = allowed_mask(self.act, cfg)
+        mask = allowed_mask(self.act, cfg, budget=False)
         if not mask[np.arange(self.E), a].all():
             bad = [(i, ACTIONS[a[i]]) for i in range(self.E) if not mask[i, a[i]]]
-            raise ValueError(f"disallowed actions reached the fleet: {bad[:5]}")
+            raise ValueError(f"physically impossible actions reached the fleet: {bad[:5]}")
         flags = apply_actions(self.act, a, cfg)
         self.cache = np.where(flags["warm"], self.cache + cfg["cache_warm_gain"] * (1 - self.cache), self.cache)
         self.failed_over = self.failed_over | flags["failover"]
@@ -232,11 +264,12 @@ class Fleet:
         load = self.load()
         ph = physics(load, self.act.r, self.cache, h, self.act.shed, self.queue, cfg)
         cost, violation = step_cost(self.act, flags, ph["p95_ms"], ph["error_rate"], cfg)
+        shed_level = self.act.shed.copy()
         self.queue = ph["queue"]
-        self.last = {"load": load, "health": h, **ph}
+        self.last = {"load": load, "health": h, "replicas": self.act.r.copy(), **ph}
         advance_time(self.act)
         self.cache = self.cache * cfg["cache_decay"]
-        return {"cost": cost, "violation": violation, **flags}
+        return {"cost": cost, "violation": violation, "shed_level": shed_level, **flags}
 
     @property
     def done(self) -> bool:
@@ -244,19 +277,20 @@ class Fleet:
 
 
 def simulate_open_loop(start_queue, start_cache, start_failed, act: Actuator, loads: np.ndarray,
-                       health: np.ndarray, action_seqs: np.ndarray, cfg: Dict) -> np.ndarray:
+                       health: np.ndarray, action_seqs: np.ndarray, cfg: Dict,
+                       limits: Optional[Dict[str, object]] = None) -> np.ndarray:
     """Roll the true dynamics for N parallel copies under fixed action sequences (oracle planning).
 
-    loads, health: (N, H); action_seqs: (N, H). Disallowed actions become noop. A failover chosen at
-    step k restores health from step k+1, which models the one-step approval delay. Returns (N,) cost
-    sums discounted by 0.97 per step."""
+    loads, health: (N, H); action_seqs: (N, H). Disallowed actions (under ``limits``, the gate's by
+    default the simulator's) become noop. A failover chosen at step k restores health from step k+1,
+    which models the one-step approval delay. Returns (N,) cost sums discounted by 0.97 per step."""
     N, H = action_seqs.shape
     act = act.copy()
     queue, cache, failed = start_queue.copy(), start_cache.copy(), start_failed.copy()
     total = np.zeros(N)
     for k in range(H):
         a = action_seqs[:, k].copy()
-        m = allowed_mask(act, cfg)
+        m = allowed_mask(act, cfg, limits)
         a = np.where(m[np.arange(N), a], a, NOOP)
         flags = apply_actions(act, a, cfg)
         cache = np.where(flags["warm"], cache + cfg["cache_warm_gain"] * (1 - cache), cache)

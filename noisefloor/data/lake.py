@@ -9,6 +9,10 @@ Tables (all local directories; paths must not contain spaces, see delta-rs issue
 Every training run records the Delta version it read, and ``DeltaTable(path, version=v)`` reproduces
 exactly that data later. The training loader reads only an allow-list of columns, so the true state
 and the distractor values cannot leak into a model.
+
+Rebuilding is safe: a level is written with an overwrite of its own partition, never appended, and
+both tables carry the trajectories' content hash, which the loaders compare, so observations can
+never be paired silently with trajectories they were not rendered from.
 """
 from __future__ import annotations
 
@@ -29,8 +33,9 @@ def _list_col(x: np.ndarray) -> pa.Array:
     return pa.FixedSizeListArray.from_arrays(flat, x.shape[-1])
 
 
-def write_trajectories(path: Path, tr: Trajectories, data_seed: int) -> int:
+def write_trajectories(path: Path, tr: Trajectories, data_seed: int, data_hash: str = "") -> int:
     N, T = tr.action.shape
+    data_hash = data_hash or trajectory_hash(tr)
     tbl = pa.table({
         "episode_id": np.repeat(tr.episode_id, T).astype(np.int32),
         "split": np.repeat(np.array(tr.split), T),
@@ -44,12 +49,15 @@ def write_trajectories(path: Path, tr: Trajectories, data_seed: int) -> int:
         "reset": tr.reset.reshape(-1),
         "violation": tr.violation.reshape(-1),
         "data_seed": np.full(N * T, data_seed, np.int64),
+        "data_hash": np.full(N * T, data_hash),
     })
-    write_deltalake(str(path), tbl, mode="overwrite")
+    write_deltalake(str(path), tbl, mode="overwrite", schema_mode="overwrite")
     return DeltaTable(str(path)).version()
 
 
-def write_observations(path: Path, level: str, episode_id: np.ndarray, obs: np.ndarray, xi16: np.ndarray) -> int:
+def write_observations(path: Path, level: str, episode_id: np.ndarray, obs: np.ndarray, xi16: np.ndarray,
+                       data_hash: str = "") -> int:
+    """Write one level, replacing any earlier copy of that level (its own partition)."""
     N, T, _ = obs.shape
     tbl = pa.table({
         "level": np.full(N * T, level),
@@ -57,9 +65,32 @@ def write_observations(path: Path, level: str, episode_id: np.ndarray, obs: np.n
         "t": np.tile(np.arange(T), N).astype(np.int16),
         "obs": _list_col(obs.reshape(N * T, -1)),
         "xi16": _list_col(xi16.reshape(N * T, -1)),
+        "data_hash": np.full(N * T, data_hash),
     })
-    write_deltalake(str(path), tbl, mode="append", partition_by=["level"])
+    if (Path(path) / "_delta_log").exists():
+        write_deltalake(str(path), tbl, mode="overwrite", predicate=f"level = '{level}'", partition_by=["level"])
+    else:
+        write_deltalake(str(path), tbl, mode="overwrite", partition_by=["level"])
     return DeltaTable(str(path)).version()
+
+
+def trajectory_hash(tr: Trajectories) -> str:
+    """Content hash of the simulated days (states, actuator, actions, costs, resets), 16 hex chars."""
+    import hashlib
+    h = hashlib.sha256()
+    for arr in (tr.state, tr.act_vec, tr.action, tr.cost, tr.reset):
+        h.update(np.ascontiguousarray(arr).tobytes())
+    return h.hexdigest()[:16]
+
+
+def _check_hash(traj_tbl: pa.Table, obs_tbl: pa.Table) -> None:
+    th = set(traj_tbl.column("data_hash").unique().to_pylist()) if "data_hash" in traj_tbl.column_names else set()
+    oh = set(obs_tbl.column("data_hash").unique().to_pylist()) if "data_hash" in obs_tbl.column_names else set()
+    th.discard("")
+    oh.discard("")
+    if th and oh and th != oh:
+        raise ValueError(f"observations were rendered from trajectories with hash {sorted(oh)}, "
+                         f"but the trajectories table has {sorted(th)}: rebuild the lake")
 
 
 def _to_array(col: pa.ChunkedArray, width: int) -> np.ndarray:
@@ -76,8 +107,8 @@ def load_training_arrays(lake: Path, level: str, splits: Sequence[str] = ("train
         raise ValueError(f"columns not allowed in a training loader: {sorted(bad)}")
     traj = DeltaTable(str(lake / "trajectories"), version=traj_version)
     obs_t = DeltaTable(str(lake / "observations"), version=obs_version)
-    tcols = ["episode_id", "t", "split"] + [c for c in ("actuator", "action", "cost", "violation", "reset") if c in columns]
-    tt = traj.to_pyarrow_table(columns=tcols)
+    tcols = ["episode_id", "t", "split", "data_hash"] + [c for c in ("actuator", "action", "cost", "violation", "reset") if c in columns]
+    tt = traj.to_pyarrow_table(columns=[c for c in tcols if c in traj.schema().to_arrow().names])
     split_mask = np.isin(np.asarray(tt.column("split")), list(splits))
     ep = np.asarray(tt.column("episode_id"))[split_mask]
     tsteps = np.asarray(tt.column("t"))[split_mask]
@@ -92,11 +123,16 @@ def load_training_arrays(lake: Path, level: str, splits: Sequence[str] = ("train
         if c in columns:
             out[c] = np.asarray(tt.column(c))[split_mask][order].reshape(len(eps), T)
     if "obs" in columns:
-        ot = obs_t.to_pyarrow_table(columns=["episode_id", "t", "obs"], filters=[("level", "=", level)])
+        ocols = ["episode_id", "t", "obs"] + (["data_hash"] if "data_hash" in obs_t.schema().to_arrow().names else [])
+        ot = obs_t.to_pyarrow_table(columns=ocols, filters=[("level", "=", level)])
+        _check_hash(tt, ot)
         oep = np.asarray(ot.column("episode_id"))
         keep = np.isin(oep, eps)
         ots = np.asarray(ot.column("t"))[keep]
         oep = oep[keep]
+        if keep.sum() != len(eps) * T:
+            raise ValueError(f"level {level!r} holds {keep.sum()} rows for these episodes, expected {len(eps) * T}: "
+                             "the level was written more than once or is incomplete; rebuild the lake")
         o = _to_array(ot.column("obs"), 128)[keep][np.lexsort((ots, oep))]
         out["obs"] = o.reshape(len(eps), T, 128)
     return out
@@ -113,6 +149,8 @@ def load_probe_arrays(lake: Path, level: str, splits: Sequence[str] = ("val",)) 
                                                                   filters=[("level", "=", level)])
     oep, ots = np.asarray(ot.column("episode_id")), np.asarray(ot.column("t"))
     k2 = np.isin(oep, np.unique(ep))
+    if k2.sum() != len(state):
+        raise ValueError(f"level {level!r} holds {k2.sum()} observation rows for {len(state)} state rows: rebuild the lake")
     o2 = np.lexsort((ots[k2], oep[k2]))
     return {"state": state, "obs": _to_array(ot.column("obs"), 128)[k2][o2], "xi16": _to_array(ot.column("xi16"), 16)[k2][o2]}
 

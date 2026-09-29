@@ -19,7 +19,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List
 
-from ..sim.fleet import ACTIONS, Actuator
+import numpy as np
+
+from ..sim.fleet import ACTIONS, Actuator, allowed_mask, physical_limits
 
 EFFECTS = ("reversible", "compensable", "irreversible")
 
@@ -83,6 +85,33 @@ class Gate:
         if not p.exists():
             p = Path(__file__).resolve().parents[2] / "configs" / path
         return cls(json.loads(p.read_text(encoding="utf-8")), source=p.name)
+
+    @property
+    def window(self) -> int:
+        return int(self.budget.get("window_steps", 1))
+
+    def limits(self, cfg: Dict) -> Dict[str, Any]:
+        """The catalog's constraints in the form the vectorised `allowed_mask` takes, intersected with
+        the simulator's physical limits (a catalog can tighten a bound, never loosen it). Planners,
+        the harness and the gate all derive their masks from this one place."""
+        phys = physical_limits(cfg)
+
+        def bound(action: str, arg: str, key: str, default: float) -> float:
+            return float(self.caps.get(action, {}).get("constraints", {}).get(arg, {}).get(key, default))
+
+        rmax = min(phys["replicas_max"], bound("scale_up_2", "replicas_after", "max", np.inf),
+                   bound("scale_up_6", "replicas_after", "max", np.inf))
+        rmin = max(phys["replicas_min"], bound("scale_down_2", "replicas_after", "min", -np.inf))
+        warm = max(phys["cache_warm_every"], bound("cache_warm", "steps_since_warm", "min", 0))
+        shed = min(phys["shed_max"], bound("shed_10", "shed_after", "max", np.inf))
+        fail = min(phys["failovers_per_day"], bound("failover", "failovers_today", "max", np.inf) + 1)
+        return {"replicas_max": rmax, "replicas_min": rmin, "cache_warm_every": warm, "shed_max": shed,
+                "failovers_per_day": fail, "budget_actions": int(self.budget["actions"]),
+                "allowed_actions": frozenset(n for n in ACTIONS if n in self.caps)}
+
+    def mask(self, act: Actuator, cfg: Dict) -> np.ndarray:
+        """(E, 7) bool: the actions this gate would allow or send for approval right now."""
+        return allowed_mask(act, cfg, self.limits(cfg))
 
     @staticmethod
     def arguments(action: str, act: Actuator, i: int, cfg: Dict) -> Dict[str, Any]:

@@ -42,11 +42,11 @@ jobs:
           python-version: "3.11"
       - run: python -m pip install torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu
       - run: python -m pip install -e .
-      - name: Record the commit and the pre-registration tag it descends from
+      - name: Require that the grid runs on exactly the pre-registration tag's commit
         run: |
           git fetch --tags --force -q
           echo "commit $(git rev-parse --short HEAD); prereg tag ${{ inputs.prereg }} at $(git rev-list -n 1 ${{ inputs.prereg }} | cut -c1-7)" | tee provenance.txt
-          git merge-base --is-ancestor ${{ inputs.prereg }} HEAD
+          test "$(git rev-parse HEAD)" = "$(git rev-list -n 1 ${{ inputs.prereg }})"
       - name: Run the shard
         run: noisefloor grid --tier ${{ inputs.tier }} --shard ${{ matrix.shard }} --of $SHARDS --lake lake --runs runs --job grid
       - name: Keep only the tables and models (observations are regenerated deterministically)

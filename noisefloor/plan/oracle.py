@@ -47,10 +47,10 @@ class OracleMPC:
             q = np.repeat(fleet.queue, S * C)
             c = np.repeat(fleet.cache, S * C)
             f = np.repeat(fleet.failed_over, S * C)
-            total = simulate_open_loop(q, c, f, act, L, hh, a, self.cfg)
+            total = simulate_open_loop(q, c, f, act, L, hh, a, self.cfg, ctx.limits)
             return total.reshape(E, S, C).mean(-1)
 
         init = None if self.p is None else shift(self.p)
         ranked, _, self.p = cem_plan(E, N_ACTIONS, cost_fn, self.rng, horizon=H, samples=S, elites=self.el,
-                                     iterations=self.it, init=init)
+                                     iterations=self.it, init=init, first_mask=ctx.mask)
         return ranked
