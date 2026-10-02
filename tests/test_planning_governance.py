@@ -5,7 +5,7 @@ import pytest
 
 from noisefloor.agents.rules import HPA, Context
 from noisefloor.agents.wm_agent import rollout_actuator
-from noisefloor.audit.envelopes import HAVE_TRACEWAKE, EnvelopeRecorder, envelope_dict, run_id
+from noisefloor.audit.envelopes import HAVE_STERNWATCH, EnvelopeRecorder, envelope_dict, run_id
 from noisefloor.config import sim_config
 from noisefloor.eval.stats import hierarchical_bootstrap, holm, iqm, seed_t_interval, tost
 from noisefloor.govern.gate import Gate
@@ -242,10 +242,10 @@ def test_envelope_shape_and_ids():
     assert d["producer"] == "noisefloor/agent@abc1234" and d["ts"].endswith("Z")
 
 
-@pytest.mark.skipif(not HAVE_TRACEWAKE, reason="tracewake (audit extra) not installed")
-def test_wakeledger_ingest_is_idempotent():
-    from tracewake.bus import MemoryBus
-    from tracewake.ledger import WakeLedger
+@pytest.mark.skipif(not HAVE_STERNWATCH, reason="sternwatch (audit extra) not installed")
+def test_watchledger_ingest_is_idempotent():
+    from sternwatch.bus import MemoryBus
+    from sternwatch.ledger import WatchLedger
     rec = EnvelopeRecorder("jepa", "main", 0, "main", 0.8, [100000, 100001], sha="abc1234")
     for t in range(5):
         for i in range(2):
@@ -253,7 +253,7 @@ def test_wakeledger_ingest_is_idempotent():
     bus = MemoryBus()
     rec.publish(bus)
     rec.publish(bus)                                 # the same envelopes twice
-    ledger = WakeLedger()
+    ledger = WatchLedger()
     stats = ledger.ingest(bus, "noisefloor.decisions")
     assert stats.inserted == 10 and stats.duplicates == 10 and stats.invalid == 0
     assert ledger.count() == 10 and ledger.gaps(rec.ids[0]) == []

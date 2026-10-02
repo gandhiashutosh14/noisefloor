@@ -6,7 +6,7 @@
     noisefloor grid      --tier 1 --shard 0 --of 8 --lake lake-0 --runs runs-0
     noisefloor aggregate --shards "artifacts/*/lake" --out lake-all
     noisefloor report    --lake lake-all
-    noisefloor audit     [--bootstrap localhost:9092] (3 episodes -> TRACEWAKE log -> ledger -> replay under gate-v2)
+    noisefloor audit     [--bootstrap localhost:9092] (3 episodes -> STERNWATCH log -> ledger -> replay under gate-v2)
     noisefloor smoke     (200 training steps, 2 evaluation days)
 """
 from __future__ import annotations
@@ -119,7 +119,7 @@ def cmd_report(a) -> None:
 
 
 def cmd_audit(a) -> None:
-    """Train (or load) a JEPA agent, run a few evaluation days, and audit them through TRACEWAKE."""
+    """Train (or load) a JEPA agent, run a few evaluation days, and audit them through STERNWATCH."""
     from .agents.wm_agent import WMAgent
     from .audit.envelopes import EnvelopeRecorder
     from .audit.replay import run_audit
@@ -142,10 +142,10 @@ def cmd_audit(a) -> None:
     rec = EnvelopeRecorder("jepa", "audit", 0, "main", 0.8, ids, agent=agent)
     run_agent(agent, cfg, gate, world=load_world(lake, cell.level), n=a.episodes, record=rec)
     if a.bootstrap:
-        from tracewake.bus import KafkaBus
+        from sternwatch.bus import KafkaBus
         bus, describe = KafkaBus(a.bootstrap, ready_timeout_s=180.0), f"Kafka-compatible broker at {a.bootstrap}"
     else:
-        from tracewake.bus import MemoryBus
+        from sternwatch.bus import MemoryBus
         bus, describe = MemoryBus(), "in-memory log"
     out = run_audit(rec, bus, Path(a.out), Path(a.out).with_suffix(".json"), topic=a.topic, describe=describe)
     _log(json.dumps({k: v for k, v in out.items() if k != "examples"}))

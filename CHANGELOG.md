@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased (2026-10-02)
+
+The audit-envelope dependency is now STERNWATCH (`pip install -e .[audit]` installs v0.4.0-alpha; the
+project was renamed and no behaviour changed). The AutoMQ audit report is regenerated with this code.
+
 ## 0.2.0a1 (main, 2026-09-30; not a new experiment)
 
 Fixes from the code review of 2026-09-29. The pre-registered results (tag `prereg-v1`, release v0.1.0) were
@@ -28,7 +33,7 @@ Records and metrics
   and the gate's limits to agents (`Context.pending`, `Context.limits`).
 - `shed_frac` reports the shed level that was billed; `churn` counts scale reversals within three steps;
   `plan_ms` is documented as batch time per environment; probes record the latent's scale (`z_std`).
-- TRACEWAKE run ids include the latent width; envelopes carry the gate's policy id and the candidate list; the
+- STERNWATCH run ids include the latent width; envelopes carry the gate's policy id and the candidate list; the
   audit replay applies the new catalog's action budget over the run's own history.
 - MLflow decision traces (spans) are written for one evaluation day in eight, as the README always said.
 

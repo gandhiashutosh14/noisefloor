@@ -1,7 +1,7 @@
-"""Every decision the agent makes becomes a TRACEWAKE TraceEnvelope.
+"""Every decision the agent makes becomes a STERNWATCH TraceEnvelope.
 
     run_id   "{model}-{variant}-s{seed}-{arm}-d{d}-e{episode}"
-    seq      t + 1 (TRACEWAKE sequence numbers start at 1)
+    seq      t + 1 (STERNWATCH sequence numbers start at 1)
     type     "decision"
     producer "noisefloor/agent@{git sha}"
     policy   "gate-v1" (the catalog the gate enforced)
@@ -9,7 +9,7 @@
              elite_spread, mlflow_run_id, delta_version
 
 With the ``audit`` extra installed (``pip install -e .[audit]``) the envelopes are real
-tracewake.envelope.TraceEnvelope objects, published to a TRACEWAKE bus and ingested by a WakeLedger,
+sternwatch.envelope.TraceEnvelope objects, published to a STERNWATCH bus and ingested by a WatchLedger,
 which is idempotent on (run_id, seq). Without it, ``envelope_dict`` produces the same JSON shape.
 """
 from __future__ import annotations
@@ -20,11 +20,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 try:  # optional dependency
-    from tracewake.envelope import TraceEnvelope  # type: ignore
-    HAVE_TRACEWAKE = True
+    from sternwatch.envelope import TraceEnvelope  # type: ignore
+    HAVE_STERNWATCH = True
 except Exception:  # pragma: no cover - exercised when the extra is absent
     TraceEnvelope = None
-    HAVE_TRACEWAKE = False
+    HAVE_STERNWATCH = False
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 EVENT_TYPE = "decision"
@@ -64,8 +64,8 @@ def envelope_dict(rid: str, t: int, episode: int, decision: Dict[str, Any], *, s
 
 
 def to_envelope(d: Dict[str, Any]):
-    if not HAVE_TRACEWAKE:
-        raise RuntimeError("tracewake is not installed; pip install -e .[audit]")
+    if not HAVE_STERNWATCH:
+        raise RuntimeError("sternwatch is not installed; pip install -e .[audit]")
     return TraceEnvelope(run_id=d["run_id"], seq=d["seq"], ts=d["ts"], type=d["type"], data=d["data"],
                          policy_id=d["policy_id"], producer=d["producer"])
 
@@ -90,7 +90,7 @@ class EnvelopeRecorder:
                                        policy_id=self.policy_id, extra=extra))
 
     def publish(self, bus, topic: str = "noisefloor.decisions") -> int:
-        """Publish every envelope to a TRACEWAKE bus (MemoryBus or the Kafka/AutoMQ bus)."""
+        """Publish every envelope to a STERNWATCH bus (MemoryBus or the Kafka/AutoMQ bus)."""
         bus.ensure_topic(topic)
         for d in self.rows:
             env = to_envelope(d)

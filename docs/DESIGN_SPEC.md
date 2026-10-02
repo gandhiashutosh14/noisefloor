@@ -86,7 +86,7 @@ else noop; emit TraceEnvelope
 ```
 
 - **Gate:** `configs/gate_v1.json` uses the governed-agent-orchestrator catalog schema (effect, requires_approval, compensation, constraints) with its check_constraints semantics. An irreversible entry without requires_approval fails at load. Every agent, HPA included, uses the same gate and action set.
-- **Envelope:** `TraceEnvelope(run_id="{model}-{variant}-s{seed}-{arm}-d{d}-e{ep}", seq=t, type="decision", producer="noisefloor/agent@{sha}", policy_id="gate-v1", data={proposed, executed, effect_class, args, verdict, reason, approval_id, predicted_cost, elite_spread, mlflow_run_id, delta_version})` → TRACEWAKE MemoryBus → WakeLedger (idempotent on (run_id, seq)).
+- **Envelope:** `TraceEnvelope(run_id="{model}-{variant}-s{seed}-{arm}-d{d}-e{ep}", seq=t, type="decision", producer="noisefloor/agent@{sha}", policy_id="gate-v1", data={proposed, executed, effect_class, args, verdict, reason, approval_id, predicted_cost, elite_spread, mlflow_run_id, delta_version})` → STERNWATCH MemoryBus → WatchLedger (idempotent on (run_id, seq)).
 - **Surprise fallback** (hold and page when latent error exceeds the training p99 for 3 steps): off in the science grid and used only as an ablation. It never hands control to a golden-channel controller.
 
 ## 6. Baselines and ablations
@@ -191,7 +191,7 @@ Pins:
 ## 10. Repo layout
 
 ```
-noisefloor/ README.md PREREGISTRATION.md RESULTS.md pyproject.toml ([audit] extra = tracewake)
+noisefloor/ README.md PREREGISTRATION.md RESULTS.md pyproject.toml ([audit] extra = sternwatch)
   configs/ sim.yaml grid.yaml prices.yaml gate_v1.json gate_v2.json
   noisefloor/ __init__.py (CPU guard)
     sim/{fleet,loads,telemetry}.py   data/{collect,lake,loader}.py
@@ -211,7 +211,7 @@ noisefloor/ README.md PREREGISTRATION.md RESULTS.md pyproject.toml ([audit] extr
 6. CEM solves a toy categorical problem and respects masks.
 7. Gate: denials, the irreversible-without-approval load error, budget, shed compensation.
 8. HPA matches hand-computed Kubernetes cases (tolerance, stabilisation).
-9. Envelope schema; WakeLedger idempotency.
+9. Envelope schema; WatchLedger idempotency.
 10. Delta write/append/`version=0` round-trip.
 11. Bootstrap coverage on synthetic data; TOST.
 12. End-to-end smoke: 200 steps + 2 episodes.
@@ -227,7 +227,7 @@ noisefloor/ README.md PREREGISTRATION.md RESULTS.md pyproject.toml ([audit] extr
   1. A data job uploads the lake.
   2. 8 matrix jobs run the grid.
   3. An aggregate job merges the Delta shards, bootstraps, and renders `reports/headline.png`, the table and `RESULTS.md`. Outputs are stamped with the SHA, prereg tag and command. The owner commits them.
-- **`audit.yml`** (manual): TRACEWAKE's AutoMQ compose (Docker on the runner only) receives 3 episodes. PolicyEcho replays them under `gate_v2.json` (≤24 replicas, no failover) and lists the decisions that would flip.
+- **`audit.yml`** (manual): STERNWATCH's AutoMQ compose (Docker on the runner only) receives 3 episodes. PolicyEcho replays them under `gate_v2.json` (≤24 replicas, no failover) and lists the decisions that would flip.
 
 ## 13. Headline result
 

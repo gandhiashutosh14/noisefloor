@@ -56,7 +56,7 @@ governance gate and an audit trail around it, on a laptop CPU.
 | World models | A JEPA world model with SIGReg (encoder, action-conditioned predictor, violation-risk head, inverse-dynamics head), and four controls trained with the same recipe: reconstruction, JEPA without SIGReg (collapse control), JEPA with an EMA teacher, and a value-equivalent cost-only model. | `noisefloor/models/` |
 | Planner | Cross-entropy-method planning over 8-step action sequences in latent space. The actuator (replicas, cooldowns, action budget) is simulated exactly inside every imagined rollout under the gate's own limits, so a refused action is scored as a no-op and the ranked first actions are ones the gate accepts (fixed in v0.2: in the pre-registered run half the first choices were refused and the next candidate ran, see RESULTS.md). | `noisefloor/agents/wm_agent.py`, `noisefloor/plan/` |
 | Governance | One gate for every agent, baselines included, using the capability-catalog schema of `governed-agent-orchestrator`: effect classes (reversible, compensable, irreversible), approval for failover, a shed cap with automatic restore, an action budget. | `noisefloor/govern/`, `configs/gate_v1.json` |
-| Audit | Every decision is recorded in TRACEWAKE envelope form with every candidate's verdict; in the audit job three days' worth are published to a Kafka-compatible log (AutoMQ in CI), rebuilt into a ledger from the log alone, and replayed under a stricter policy, action budget included, to list what would flip. | `noisefloor/audit/`, `.github/workflows/audit.yml` |
+| Audit | Every decision is recorded in STERNWATCH envelope form with every candidate's verdict; in the audit job three days' worth are published to a Kafka-compatible log (AutoMQ in CI), rebuilt into a ledger from the log alone, and replayed under a stricter policy, action budget included, to list what would flip. | `noisefloor/audit/`, `.github/workflows/audit.yml` |
 | Experiment tracking | MLflow runs per training and evaluation (params, metrics every 50 steps, probes, the encoder as a logged model), with one SQLite store per process; decision traces as MLflow spans (encode, plan, gate, act) for one evaluation day in eight. | `noisefloor/tracking.py` |
 | Science | Pre-registered hypotheses, paired evaluation days, hierarchical bootstrap, seed-level t-intervals, TOST, Holm correction; the full grid runs in GitHub Actions. | `PREREGISTRATION.md`, `noisefloor/eval/`, `.github/workflows/grid.yml` |
 
@@ -79,7 +79,7 @@ governance gate and an audit trail around it, on a laptop CPU.
                                                           |              |
                                                    fleet executes    approver (1-step delay)
                                                           |
-                                     TRACEWAKE envelope -> log -> ledger -> replay under gate-v2
+                                     STERNWATCH envelope -> log -> ledger -> replay under gate-v2
 ```
 
 Design choices worth knowing, each with its reason in the code:
@@ -165,7 +165,7 @@ plus mislabelled verdicts in the report. The pre-registered numbers stand as rep
 reference numbers, the definition of what `d` measures, and every fix are in
 [`RESULTS.md`](RESULTS.md) ("Post-registration findings and corrections") and [`CHANGELOG.md`](CHANGELOG.md).
 
-Audit trail: three evaluation days of a JEPA agent trained inside the audit job went through TRACEWAKE on a
+Audit trail: three evaluation days of a JEPA agent trained inside the audit job went through STERNWATCH on a
 real AutoMQ 1.7.4 broker (MinIO-compatible object store) in CI ([`audit.yml`](.github/workflows/audit.yml), report in [`reports/audit-automq.md`](reports/audit-automq.md)). 861 decisions were published twice; the
 ledger rebuilt from the log inserted 861 and ignored 861 duplicates, with no gaps. Replaying all 301
 executed actions under a stricter policy (max 24 replicas, no failover) flipped none, because the
@@ -183,7 +183,7 @@ pytest -q                                             # 56 tests, ~25 s
 noisefloor smoke                                      # data -> 200 training steps -> 2 governed days, ~30 s
 noisefloor data                                       # the full lake: 250 days x 6 telemetry levels
 noisefloor cell --variant jepa --d 0.8 --seed 0       # train + evaluate one model (~3 min)
-noisefloor audit                                      # 3 days through TRACEWAKE, replayed under gate-v2
+noisefloor audit                                      # 3 days through STERNWATCH, replayed under gate-v2
 python scripts/posthoc_baselines.py                   # the corrected baselines (post-registration analysis)
 noisefloor grid --tier 2 --shard 0 --of 16            # one shard of the pre-registered grid
 mlflow ui --backend-store-uri sqlite:///mlruns/local-0.db
@@ -216,7 +216,7 @@ noisefloor/
   plan/       cem.py  oracle.py
   agents/     rules.py (HPA, runbook, predictive, static)  wm_agent.py (latent CEM)
   govern/     gate.py (catalog, constraints, budget)  approver.py
-  audit/      envelopes.py (TRACEWAKE)  replay.py (ledger replay under gate-v2)
+  audit/      envelopes.py (STERNWATCH)  replay.py (ledger replay under gate-v2)
   eval/       harness.py  run.py  probes.py  stats.py  report.py
   grid.py  cli.py  tracking.py (MLflow)
 configs/      sim.json  grid.json  gate_v1.json  gate_v2.json

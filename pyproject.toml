@@ -36,7 +36,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.6"]
-audit = ["tracewake @ git+https://github.com/gandhiashutosh14/tracewake@v0.3.0-alpha"]
+audit = ["sternwatch @ git+https://github.com/gandhiashutosh14/sternwatch@v0.4.0-alpha"]
 
 [project.urls]
 Homepage = "https://github.com/gandhiashutosh14/noisefloor"

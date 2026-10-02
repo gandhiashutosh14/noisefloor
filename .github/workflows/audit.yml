@@ -1,7 +1,7 @@
 name: audit
 
-# Three evaluation days of the JEPA agent go through TRACEWAKE on a real Kafka-compatible broker:
-# AutoMQ 1.7.4 on MinIO, started from TRACEWAKE's own compose file. The ledger is rebuilt from the
+# Three evaluation days of the JEPA agent go through STERNWATCH on a real Kafka-compatible broker:
+# AutoMQ 1.7.4 on MinIO, started from STERNWATCH's own compose file. The ledger is rebuilt from the
 # broker alone, the publish is repeated to show idempotency, and every recorded decision is replayed
 # under gate-v2 (max 24 replicas, no failover).
 
@@ -15,7 +15,7 @@ env:
   CUDA_VISIBLE_DEVICES: ""
   PYTHONUTF8: "1"
   NOISEFLOOR_MLFLOW: "0"
-  TRACEWAKE_REF: v0.3.0-alpha
+  STERNWATCH_REF: v0.4.0-alpha
 
 jobs:
   automq:
@@ -26,22 +26,22 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Check out TRACEWAKE next to this repository
-        run: git clone -q --branch "$TRACEWAKE_REF" --depth 1 https://github.com/gandhiashutosh14/tracewake ../tracewake
+      - name: Check out STERNWATCH next to this repository
+        run: git clone -q --branch "$STERNWATCH_REF" --depth 1 https://github.com/gandhiashutosh14/sternwatch ../sternwatch
       - run: python -m pip install torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu
-      - run: python -m pip install -e . -e ../tracewake
+      - run: python -m pip install -e . -e ../sternwatch
       - name: Start AutoMQ 1.7.4 with MinIO
-        run: docker compose -f ../tracewake/docker/compose.yaml up -d
+        run: docker compose -f ../sternwatch/docker/compose.yaml up -d
       - name: Wait for the broker
-        run: python ../tracewake/scripts/wait_for_broker.py localhost:9092 --timeout 240
+        run: python ../sternwatch/scripts/wait_for_broker.py localhost:9092 --timeout 240
       - name: Audit three days through AutoMQ
         run: noisefloor audit --bootstrap localhost:9092 --episodes 3 --out artifacts/audit-automq.md
       - name: Collect logs
         if: always()
         run: |
           mkdir -p artifacts
-          docker compose -f ../tracewake/docker/compose.yaml logs --no-color server1 > artifacts/automq-server1.log 2>&1 || true
-          docker compose -f ../tracewake/docker/compose.yaml down -v || true
+          docker compose -f ../sternwatch/docker/compose.yaml logs --no-color server1 > artifacts/automq-server1.log 2>&1 || true
+          docker compose -f ../sternwatch/docker/compose.yaml down -v || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -33,7 +33,7 @@ jobs:
       - run: python -m pytest -q
       - name: Smoke run (200 training steps, 2 evaluation days)
         run: noisefloor smoke
-      - name: Audit through TRACEWAKE (in-memory log)
+      - name: Audit through STERNWATCH (in-memory log)
         run: noisefloor audit --steps 200 --episodes 2 --out artifacts/audit-memory.md
       - uses: actions/upload-artifact@v4
         if: always()

@@ -1,15 +1,15 @@
 """Audit a few episodes end to end: envelopes -> log -> ledger -> replay under a changed policy.
 
-1. A trained agent runs evaluation days; every decision becomes a TRACEWAKE TraceEnvelope.
+1. A trained agent runs evaluation days; every decision becomes a STERNWATCH TraceEnvelope.
 2. The envelopes are published to a bus (in memory, or a Kafka-compatible broker such as AutoMQ),
    twice, to show that the ledger is idempotent on (run_id, seq).
-3. A WakeLedger is rebuilt from the log alone.
+3. A WatchLedger is rebuilt from the log alone.
 4. Every recorded decision is replayed against a stricter catalog (gate-v2: at most 24 replicas, no
    failover) using the arguments recorded at decision time, and the decisions that would flip are
    listed. The new catalog's action budget is replayed too, from the sequence of executed actions in
    the ledger (a rolling window over the run's own history).
 
-Requires the audit extra (tracewake).
+Requires the audit extra (sternwatch).
 """
 from __future__ import annotations
 
@@ -66,10 +66,10 @@ def replay_ledger(ledger, gate_new: Gate) -> Dict:
 
 def run_audit(recorder, bus, out_md: Path, out_json: Optional[Path] = None, topic: str = "noisefloor.decisions",
               policy_new: str = "gate_v2.json", describe: str = "in-memory") -> Dict:
-    from tracewake.ledger import WakeLedger
+    from sternwatch.ledger import WatchLedger
     n1 = recorder.publish(bus, topic)
     n2 = recorder.publish(bus, topic)
-    ledger = WakeLedger()
+    ledger = WatchLedger()
     stats = ledger.ingest(bus, topic)
     gaps = {rid: ledger.gaps(rid) for rid in ledger.runs()}
     rep = replay_ledger(ledger, Gate.load(policy_new))
@@ -77,7 +77,7 @@ def run_audit(recorder, bus, out_md: Path, out_json: Optional[Path] = None, topi
               "events": ledger.count(), "gaps": {k: v for k, v in gaps.items() if v},
               "idempotent": stats.inserted == n1 and stats.duplicates == n2,
               "replay_policy": Gate.load(policy_new).policy_id, **rep}
-    lines = [f"# Audit: {result['runs']} episodes through TRACEWAKE ({describe})", "",
+    lines = [f"# Audit: {result['runs']} episodes through STERNWATCH ({describe})", "",
              f"- envelopes published: {n1}, then the same {n2} again",
              f"- ledger rebuilt from the log: {stats.inserted} inserted, {stats.duplicates} duplicates ignored, "
              f"{stats.invalid} invalid; idempotent: **{result['idempotent']}**; sequence gaps: {len(result['gaps'])}",

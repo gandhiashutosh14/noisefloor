@@ -12,4 +12,4 @@ where each idea comes from and what, if anything, was reused.
 | HPA baseline | Kubernetes Horizontal Pod Autoscaler algorithm (kubernetes.io docs) | The published formula, tolerance and stabilisation window. |
 | Latency model | Sakasegawa approximation for M/M/c, with Little's law | Textbook formulas. |
 | Gate catalog schema and constraint semantics | `governed-agent-orchestrator` (same author, MIT) | The schema and `check_constraints` rules, reimplemented. |
-| Audit envelopes | `tracewake` (same author, MIT) | Used as an optional dependency (`pip install -e .[audit]`). |
+| Audit envelopes | `sternwatch` (same author, MIT) | Used as an optional dependency (`pip install -e .[audit]`). |
